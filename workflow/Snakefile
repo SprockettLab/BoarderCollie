@@ -123,18 +123,24 @@ rule screen:
         log=LIB / "genomes" / "{acc}" / "fcs_gx" / GX / "run_gx.log",
     params:
         db=CFG.fcs_gx_db,
-        stage=CFG.fcs_gx_stage or "",
+        stage=" ".join(str(p) for p in CFG.fcs_gx_stage),
         out=lambda w: LIB / "genomes" / w.acc / "fcs_gx" / GX,
     threads: 32
     resources:
         mem_mb=700000,
     shell:
         r"""
-        db={params.db}
-        if [ -n "{params.stage}" ]; then
-          db={params.stage}/gxdb_$$; trap 'rm -rf "$db"' EXIT
-          cp -r {params.db} "$db"
-        fi
+        # Copy the database to the first staging directory with room for it (plus 20 GB), else read it in place.
+        db={params.db}; where="in place (no staging directory had room)"
+        need=$(( $(du -sb {params.db} | cut -f1) + 20000000000 ))
+        for d in {params.stage}; do
+          [ -d "$d" ] && [ -w "$d" ] || continue
+          if [ "$(df -B1 --output=avail "$d" | tail -n 1)" -gt "$need" ]; then
+            db="$d/gxdb_$$"; where="$d"; trap 'rm -rf "$db"' EXIT
+            cp -r {params.db} "$db"; break
+          fi
+        done
+        echo "FCS-GX database read from: $where" > {output.log}.stage
         taxid=$(python -m boardercollie.cli taxid {input.record})
         tmp={params.out}/tmp_$$; mkdir -p "$tmp"
         GX_NUM_CORES={threads} run_gx.py --fasta {input.fasta} --tax-id "$taxid" --gx-db "$db" --out-dir "$tmp" > {output.log} 2>&1

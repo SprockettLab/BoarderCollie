@@ -91,7 +91,7 @@ class Config:
     fcs_gx_db: Path
     hosts: list[HostSpec]
     settings: dict[str, Any]
-    fcs_gx_stage: Path | None = None
+    fcs_gx_stage: list[Path] = field(default_factory=list)
     fcs_gx_db_build: str | None = None
 
     def settings_hash(self) -> str:
@@ -157,6 +157,8 @@ def parse_config(data: dict[str, Any]) -> Config:
     unknown = set(data) - {"library_dir", "index_dir", "work_dir", "fcs_gx_db", "fcs_gx_stage", "fcs_gx_db_build", "hosts", "settings"}
     if unknown:
         raise ConfigError(f"unknown top-level keys: {sorted(unknown)}")
+    if not isinstance(data.get("fcs_gx_stage") or [], list):
+        raise ConfigError("fcs_gx_stage must be a list of directories, tried in order")
     if not isinstance(data["hosts"], list) or not data["hosts"]:
         raise ConfigError("hosts must be a non-empty list")
     hosts, names = [], set()
@@ -196,7 +198,7 @@ def parse_config(data: dict[str, Any]) -> Config:
         fcs_gx_db=Path(data["fcs_gx_db"]),
         hosts=hosts,
         settings=merge_settings(data.get("settings")),
-        fcs_gx_stage=Path(data["fcs_gx_stage"]) if data.get("fcs_gx_stage") else None,
+        fcs_gx_stage=[Path(p) for p in (data.get("fcs_gx_stage") or [])],
         fcs_gx_db_build=str(data["fcs_gx_db_build"]) if data.get("fcs_gx_db_build") else None,
     )
 
