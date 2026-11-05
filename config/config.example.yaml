@@ -1,0 +1,46 @@
+# BoarderCollie example config.
+# Paths: where genomes, cleaned genomes and records are kept (library_dir),
+# where read-alignment indexes are written (index_dir), scratch (work_dir),
+# and the FCS-GX database.
+library_dir: /path/to/host_genomes
+index_dir: /path/to/dbs
+work_dir: /path/to/scratch/boardercollie
+fcs_gx_db: /path/to/fcs_gx/gxdb
+
+# Each host: a name and one or more NCBI assembly accessions. The cleaned
+# genomes of a host are joined into one reference named after the host.
+hosts:
+  - name: Chlorocebus_spp
+    genomes: [GCF_047675955.1, GCA_023783515.1, GCA_963575115.1]
+    indexes: [bowtie2, minimap2]
+  - name: Homo_sapiens
+    genomes: [GCA_000001405.29]
+    indexes: [bowtie2]
+  # A local FASTA instead of an accession needs its NCBI tax-id; a relative
+  # may be named instead of the automatic choice:
+  # - name: My_host
+  #   genomes:
+  #     - fasta: /path/to/assembly.fna
+  #       tax_id: 9534
+  #       relative: GCF_047675955.1
+
+# Every setting has a default (shown here); remove a line to use the default.
+settings:
+  keep_taxa: [11632]               # FCS-GX hits within these NCBI taxa are kept untested (11632 = Retroviridae)
+  host_like_min: 0.5               # aligned fraction for host_like
+  foreign_like_max: 0.1            # aligned fraction below which a region is foreign_like
+  embedded_flank_bp: 10000         # a relative match counts when the relative sequence extends this far beyond it on one side
+  repeat_trf_min: 0.8              # rule R2: fraction of a region in tandem repeats
+  repeat_copy_min_cover: 0.5       # an alignment covering this fraction of a region counts as a copy
+  repeat_lineage_rank: genus       # rule R2: where copies are looked for
+  family_repeat_min: 0.5           # rule R2b: the main repeat must cover this fraction of the region
+  family_unit_min_identity: 0.8    # rule R2b: unit identity to a confirmed unit
+  family_period_tolerance: 0.1     # rule R2b: unit lengths may differ by this fraction
+  controls_per_segment: 3          # host controls per flagged region (alignment)
+  background_per_segment: 100      # background windows per flagged region (composition)
+  control_pass_min: 0.8            # share of host controls that must be host_like
+  control_max_n_frac: 0.1          # a control window is redrawn above this fraction of N
+  seed: 20261104
+  on_controls_failed: fcs_only     # fcs_only or stop
+  conflict_coding_min: 0.7         # coding fraction reported as a sign of bacterial DNA
+  conflict_background_percentiles: [1, 99]
