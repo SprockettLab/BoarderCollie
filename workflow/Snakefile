@@ -1,0 +1,376 @@
+# BoarderCollie workflow.
+#
+#   snakemake -s workflow/Snakefile --configfile config.yaml --cores 32
+#
+# Per genome: fetch, FCS-GX screen, cut flagged regions and draw controls,
+# align them to the relative and the reference ladder, tandem repeats and
+# copies, decide (boardercollie.rules), clean with gx clean-genome, check.
+# Per host: join the cleaned genomes, build bowtie2 and minimap2 indexes.
+# Every reference genome (relatives and ladder) is fetched and screened too,
+# and is used only after removing every sequence FCS-GX reported in it.
+
+import hashlib
+import json
+import re
+from pathlib import Path
+
+import yaml
+
+from boardercollie import __version__
+from boardercollie.config import parse_config, settings_hash
+
+CFG = parse_config(config)
+LIB, IDX, WORK = CFG.library_dir, CFG.index_dir, CFG.work_dir
+SETTINGS_HASH = settings_hash(CFG.settings)
+RES = Path(workflow.basedir).parent / "resources"
+# The config as used, saved once per run key set; every step reads this copy.
+CONFIGFILE = WORK / "config.used.yaml"
+CONFIGFILE.parent.mkdir(parents=True, exist_ok=True)
+CONFIGFILE.write_text(yaml.safe_dump(config, sort_keys=True))
+
+
+def db_build():
+    """FCS-GX database build date: from the config if given, else from the database's all.meta.jsonl."""
+    if CFG.fcs_gx_db_build:
+        return CFG.fcs_gx_db_build
+    meta = CFG.fcs_gx_db / "all.meta.jsonl"
+    m = re.search(r'"build-date"\s*:\s*"([0-9-]+)"', meta.read_text()) if meta.exists() else None
+    if not m:
+        raise ValueError(f"cannot read the FCS-GX database build date from {meta}")
+    return m.group(1)
+
+
+GX = db_build()
+
+# Genomes to clean, with their host settings; every accession to fetch and screen.
+GENOMES = {}
+for h in CFG.hosts:
+    for g in h.genomes:
+        GENOMES[g.key] = {"spec": g, "host": h}
+REFERENCES = sorted({g["spec"].relative for g in GENOMES.values()} | {a for h in CFG.hosts for a in h.ladder})
+ALL = sorted(set(GENOMES) | set(REFERENCES))
+
+
+def run_key(acc):
+    g = GENOMES[acc]
+    text = json.dumps({"version": __version__, "gx": GX, "settings": SETTINGS_HASH,
+                       "relative": g["spec"].relative, "ladder": g["host"].ladder}, sort_keys=True)
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def host_key(h):
+    return hashlib.sha256(json.dumps([run_key(g.key) for g in h.genomes]).encode()).hexdigest()[:12]
+
+
+def G(acc):
+    return LIB / "genomes" / acc
+
+
+def RUN(acc):
+    return G(acc) / "runs" / run_key(acc)
+
+
+def W(acc):
+    return WORK / acc / run_key(acc)
+
+
+def lineage_candidates(acc):
+    h = GENOMES[acc]["host"]
+    return sorted({GENOMES[acc]["spec"].relative} | {g.key for g in h.genomes if g.key != acc})
+
+
+HOSTS = {h.name: h for h in CFG.hosts}
+TARGETS = []
+for h in CFG.hosts:
+    hk = host_key(h)
+    TARGETS.append(LIB / "hosts" / h.name / hk / "members.tsv")
+    if "bowtie2" in h.indexes:
+        TARGETS.append(IDX / "bt2" / h.name / hk / "index_done.txt")
+    if "minimap2" in h.indexes:
+        TARGETS.append(IDX / "minimap2" / h.name / hk / f"{h.name}.map-ont.mmi")
+
+wildcard_constraints:
+    acc="[^/]+",
+    ref="GC[AF]_[0-9]+\.[0-9]+",
+    host="[^/]+",
+
+
+rule all:
+    input:
+        TARGETS,
+
+
+rule fetch:
+    output:
+        fasta=LIB / "genomes" / "{acc}" / "original" / "{acc}.fna",
+        record=LIB / "genomes" / "{acc}" / "original" / "record.json",
+    params:
+        src=lambda w: (f"--local-fasta {GENOMES[w.acc]['spec'].fasta} --tax-id {GENOMES[w.acc]['spec'].tax_id}"
+                       if w.acc in GENOMES and GENOMES[w.acc]["spec"].fasta else f"--accession {w.acc}"),
+    resources:
+        mem_mb=16000,
+    shell:
+        "python -m boardercollie.cli fetch {params.src} --out-fasta {output.fasta} --out-record {output.record}"
+
+
+rule screen:
+    input:
+        fasta=rules.fetch.output.fasta,
+        record=rules.fetch.output.record,
+    output:
+        report=LIB / "genomes" / "{acc}" / "fcs_gx" / GX / "fcs_gx_report.txt",
+        taxonomy=LIB / "genomes" / "{acc}" / "fcs_gx" / GX / "taxonomy.rpt",
+        log=LIB / "genomes" / "{acc}" / "fcs_gx" / GX / "run_gx.log",
+    params:
+        db=CFG.fcs_gx_db,
+        stage=CFG.fcs_gx_stage or "",
+        out=lambda w: LIB / "genomes" / w.acc / "fcs_gx" / GX,
+    threads: 32
+    resources:
+        mem_mb=700000,
+    shell:
+        r"""
+        db={params.db}
+        if [ -n "{params.stage}" ]; then
+          db={params.stage}/gxdb_$$; trap 'rm -rf "$db"' EXIT
+          cp -r {params.db} "$db"
+        fi
+        taxid=$(python -m boardercollie.cli taxid {input.record})
+        tmp={params.out}/tmp_$$; mkdir -p "$tmp"
+        GX_NUM_CORES={threads} run_gx.py --fasta {input.fasta} --tax-id "$taxid" --gx-db "$db" --out-dir "$tmp" > {output.log} 2>&1
+        mv "$tmp"/*.fcs_gx_report.txt {output.report}
+        mv "$tmp"/*.taxonomy.rpt {output.taxonomy}
+        rmdir "$tmp"
+        """
+
+
+rule mask_reference:
+    input:
+        fasta=rules.fetch.output.fasta,
+        report=rules.screen.output.report,
+        taxonomy=rules.screen.output.taxonomy,
+    output:
+        fasta=temp(WORK / "references" / GX / "{acc}.masked.fna"),
+        log=WORK / "references" / GX / "{acc}.masked.log",
+    shell:
+        "python -m boardercollie.cli mask --fasta {input.fasta} --report {input.report} "
+        "--taxonomy {input.taxonomy} --out {output.fasta} --log {output.log}"
+
+
+rule foreign_controls:
+    input:
+        RES / "foreign_controls.tsv",
+    output:
+        WORK / "foreign_controls.fna",
+    shell:
+        "python -m boardercollie.cli foreign-controls --tsv {input} --out {output}"
+
+
+rule extract:
+    input:
+        fasta=rules.fetch.output.fasta,
+        report=rules.screen.output.report,
+        taxonomy=rules.screen.output.taxonomy,
+    output:
+        fasta=WORK / "{acc}" / "{key}" / "segments.fna",
+        tsv=WORK / "{acc}" / "{key}" / "segments.tsv",
+        composition=WORK / "{acc}" / "{key}" / "composition.tsv",
+        fai=WORK / "{acc}" / "{key}" / "genome.fai",
+    resources:
+        mem_mb=8000,
+    shell:
+        "python -m boardercollie.cli extract --config {CONFIGFILE} --genome {input.fasta} --report {input.report} "
+        "--taxonomy {input.taxonomy} --fai {output.fai} --out-fasta {output.fasta} --out-tsv {output.tsv} "
+        "--out-composition {output.composition}"
+
+
+rule queries:
+    input:
+        segments=rules.extract.output.fasta,
+        foreign=rules.foreign_controls.output,
+    output:
+        WORK / "{acc}" / "{key}" / "queries.fna",
+    shell:
+        "cat {input.segments} {input.foreign} > {output}"
+
+
+rule flagged:
+    input:
+        rules.extract.output.fasta,
+    output:
+        WORK / "{acc}" / "{key}" / "flagged.fna",
+    shell:
+        r"""awk '/^>/ {{keep = ($0 ~ /^>R[0-9]+$/)}} keep' {input} > {output}"""
+
+
+rule align:
+    input:
+        queries=rules.queries.output,
+        ref=WORK / "references" / GX / "{ref}.masked.fna",
+    output:
+        WORK / "{acc}" / "{key}" / "align" / "{ref}.paf",
+    threads: 32
+    resources:
+        mem_mb=160000,
+    shell:
+        "minimap2 -x asm20 -c --secondary=no -I 16G -t {threads} {input.ref} {input.queries} > {output} 2> {output}.log"
+
+
+rule trf:
+    input:
+        rules.flagged.output,
+    output:
+        WORK / "{acc}" / "{key}" / "trf.ngs",
+    shell:
+        # TRF exits non-zero even when it succeeds; the output is checked by the decide step.
+        "(cd $(dirname {output}) && trf $(basename {input}) 2 7 7 80 10 50 2000 -h -ngs > trf.ngs) || true; test -e {output}"
+
+
+rule copies_own:
+    input:
+        flagged=rules.flagged.output,
+        genome=rules.fetch.output.fasta,
+    output:
+        WORK / "{acc}" / "{key}" / "copies" / "own.paf",
+    threads: 32
+    resources:
+        mem_mb=160000,
+    params:
+        n=200,
+    shell:
+        "minimap2 -x asm20 -c --secondary=yes -N {params.n} -p 0.3 -I 16G -t {threads} {input.genome} {input.flagged} > {output} 2> {output}.log"
+
+
+rule copies_ref:
+    input:
+        flagged=rules.flagged.output,
+        ref=WORK / "references" / GX / "{ref}.masked.fna",
+    output:
+        WORK / "{acc}" / "{key}" / "copies" / "{ref}.paf",
+    threads: 32
+    resources:
+        mem_mb=160000,
+    params:
+        n=200,
+    shell:
+        "minimap2 -x asm20 -c --secondary=yes -N {params.n} -p 0.3 -I 16G -t {threads} {input.ref} {input.flagged} > {output} 2> {output}.log"
+
+
+def decide_inputs(w):
+    acc, key = w.acc, w.key
+    g = GENOMES[acc]
+    d = W(acc)
+    refs = [g["spec"].relative] + [r for r in g["host"].ladder]
+    lineage = lineage_candidates(acc)
+    return {
+        "segments": d / "segments.tsv",
+        "fasta": d / "segments.fna",
+        "composition": d / "composition.tsv",
+        "foreign": WORK / "foreign_controls.fna",
+        "align": [d / "align" / f"{r}.paf" for r in refs],
+        "trf": d / "trf.ngs",
+        "own": d / "copies" / "own.paf",
+        "lineage": [d / "copies" / f"{r}.paf" for r in lineage],
+        "lineage_records": [G(r) / "original" / "record.json" for r in lineage],
+        "distant": d / "copies" / f"{g['host'].ladder[-1]}.paf",
+        "record": G(acc) / "original" / "record.json",
+    }
+
+
+def decide_args(w):
+    g = GENOMES[w.acc]
+    d = W(w.acc)
+    al = [f"--alignment {g['spec'].relative}:relative:{d / 'align' / (g['spec'].relative + '.paf')}"]
+    al += [f"--alignment {r}:ladder:{d / 'align' / (r + '.paf')}" for r in g["host"].ladder]
+    lin = " ".join(f"{r}={G(r) / 'original' / 'record.json'}={d / 'copies' / (r + '.paf')}" for r in lineage_candidates(w.acc))
+    return " ".join(al) + (f" --lineage-copies {lin}" if lin else "")
+
+
+rule decide:
+    input:
+        unpack(decide_inputs),
+    output:
+        decisions=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "decisions.tsv",
+        removals=WORK / "{acc}" / "{key}" / "removals.tsv",
+        lineage=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "lineage_assemblies.tsv",
+        taxonomy=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "taxonomy_cache.json",
+    params:
+        args=decide_args,
+    shell:
+        "python -m boardercollie.cli decide --config {CONFIGFILE} --accession {wildcards.acc} "
+        "--segments {input.segments} --segments-fasta {input.fasta} --composition {input.composition} "
+        "--foreign {input.foreign} --trf {input.trf} --own-copies {input.own} --own-record {input.record} "
+        "--distant-copies {input.distant} --taxonomy-cache {output.taxonomy} --out-decisions {output.decisions} "
+        "--out-removals {output.removals} --out-lineage {output.lineage} --settings-hash {SETTINGS_HASH} {params.args}"
+
+
+rule clean:
+    input:
+        fasta=LIB / "genomes" / "{acc}" / "original" / "{acc}.fna",
+        report=LIB / "genomes" / "{acc}" / "fcs_gx" / GX / "fcs_gx_report.txt",
+        removals=rules.decide.output.removals,
+        decisions=rules.decide.output.decisions,
+    output:
+        applied=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "applied_action_report.txt",
+        clean=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "{acc}_clean.fna",
+        removed=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "{acc}_removed.fna",
+        record=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "run.json",
+    resources:
+        mem_mb=32000,
+    shell:
+        r"""
+        python -m boardercollie.cli filter-report --report {input.report} --removals {input.removals} --out {output.applied}
+        if grep -qv '^#' {output.applied}; then
+          gx clean-genome --input={input.fasta} --action-report={output.applied} \
+            --output={output.clean}.partial --contam-fasta-out={output.removed} > {output.record}.clean.log 2>&1
+          mv {output.clean}.partial {output.clean}
+        else
+          cp {input.fasta} {output.clean}; : > {output.removed}
+        fi
+        python -m boardercollie.cli check-clean --accession {wildcards.acc} --original {input.fasta} \
+          --clean {output.clean} --removed {output.removed} --removals {input.removals} \
+          --decisions {input.decisions} --run-key {wildcards.key} --settings-hash {SETTINGS_HASH} --out {output.record}
+        """
+
+
+rule combine:
+    input:
+        clean=lambda w: [RUN(g.key) / f"{g.key}_clean.fna" for g in HOSTS[w.host].genomes],
+        records=lambda w: [RUN(g.key) / "run.json" for g in HOSTS[w.host].genomes],
+    output:
+        fasta=LIB / "hosts" / "{host}" / "{hkey}" / "{host}.fna",
+        members=LIB / "hosts" / "{host}" / "{hkey}" / "members.tsv",
+    params:
+        accs=lambda w: " ".join(g.key for g in HOSTS[w.host].genomes),
+    shell:
+        "python -m boardercollie.cli combine --accessions {params.accs} --fastas {input.clean} "
+        "--records {input.records} --out {output.fasta} --members-out {output.members}"
+
+
+rule bowtie2:
+    input:
+        rules.combine.output.fasta,
+    output:
+        IDX / "bt2" / "{host}" / "{hkey}" / "index_done.txt",
+    threads: 32
+    resources:
+        mem_mb=300000,
+    shell:
+        r"""
+        d=$(dirname {output})
+        bowtie2-build --large-index --threads {threads} {input} "$d/{wildcards.host}" > "$d/build.log" 2>&1
+        for p in 1 2 3 4 rev.1 rev.2; do test -s "$d/{wildcards.host}.$p.bt2l"; done
+        echo "bowtie2 index of {input} built $(date -Is) with $(bowtie2-build --version | head -n 1)" > {output}
+        """
+
+
+rule minimap2_index:
+    input:
+        rules.combine.output.fasta,
+    output:
+        IDX / "minimap2" / "{host}" / "{hkey}" / "{host}.map-ont.mmi",
+    threads: 16
+    resources:
+        mem_mb=120000,
+    shell:
+        "minimap2 -x map-ont -I 16G -t {threads} -d {output} {input} 2> {output}.log"

@@ -25,7 +25,26 @@ Every region, test result, rule and threshold is recorded, and the records can b
 ## Configuration
 
 See [`config/config.example.yaml`](config/config.example.yaml).
-A host is a name and a list of NCBI assembly accessions; every threshold is a setting with a default.
+A host is a name, its genomes (NCBI assembly accessions, each with its closest relative for now) and a reference ladder; every threshold is a setting with a default.
+
+## Running
+
+```
+mamba env create -f workflow/envs/boardercollie.yaml -p ./env
+./env/bin/pip install --no-deps -e .
+./env/bin/snakemake -s workflow/Snakefile --configfile config.yaml --cores 64 --resources mem_mb=740000
+```
+
+FCS-GX needs its database (about 520 GB) in memory, so screening runs one genome at a time on a large-memory node; `fcs_gx_stage` copies the database to fast local storage first.
+
+Outputs, under `library_dir`:
+
+- `genomes/<accession>/original/`: the genome as downloaded and its NCBI record (md5 checked against NCBI).
+- `genomes/<accession>/fcs_gx/<database build>/`: FCS-GX reports.
+- `genomes/<accession>/runs/<run key>/`: `decisions.tsv`, the cleaned and removed sequence, the applied FCS-GX report and `run.json`.
+- `hosts/<name>/<host key>/`: the joined host reference and `members.tsv`.
+
+and under `index_dir`: `bt2/<name>/<host key>/` and `minimap2/<name>/<host key>/`.
 
 ## Development
 

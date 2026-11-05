@@ -79,6 +79,7 @@ class GenomeSpec:
 class HostSpec:
     name: str
     genomes: list[GenomeSpec]
+    ladder: list[str]
     indexes: list[str] = field(default_factory=lambda: list(INDEX_TYPES))
 
 
@@ -90,6 +91,8 @@ class Config:
     fcs_gx_db: Path
     hosts: list[HostSpec]
     settings: dict[str, Any]
+    fcs_gx_stage: Path | None = None
+    fcs_gx_db_build: str | None = None
 
     def settings_hash(self) -> str:
         """Short hash of the settings, part of every result's run key."""
@@ -151,7 +154,7 @@ def parse_config(data: dict[str, Any]) -> Config:
     for key in ("library_dir", "index_dir", "work_dir", "fcs_gx_db", "hosts"):
         if key not in data:
             raise ConfigError(f"missing required key: {key}")
-    unknown = set(data) - {"library_dir", "index_dir", "work_dir", "fcs_gx_db", "hosts", "settings"}
+    unknown = set(data) - {"library_dir", "index_dir", "work_dir", "fcs_gx_db", "fcs_gx_stage", "fcs_gx_db_build", "hosts", "settings"}
     if unknown:
         raise ConfigError(f"unknown top-level keys: {sorted(unknown)}")
     if not isinstance(data["hosts"], list) or not data["hosts"]:
@@ -173,7 +176,19 @@ def parse_config(data: dict[str, Any]) -> Config:
         indexes = h.get("indexes", list(INDEX_TYPES))
         if not set(indexes) <= set(INDEX_TYPES):
             raise ConfigError(f"host {name}: indexes must be from {INDEX_TYPES}")
-        hosts.append(HostSpec(name=name, genomes=genomes, indexes=list(indexes)))
+        # Automatic choice of relatives and ladder references from the NCBI
+        # taxonomy is not implemented yet; until it is, both are given.
+        ladder = h.get("ladder") or []
+        if not ladder or not all(isinstance(a, str) for a in ladder):
+            raise ConfigError(f"host {name}: ladder must list reference accessions, nearest first")
+        for g in genomes:
+            if not g.relative:
+                raise ConfigError(f"host {name}: genome {g.key} needs a relative (automatic choice not available yet)")
+            if g.relative == g.key or g.relative in ladder:
+                raise ConfigError(f"host {name}: genome {g.key}: the relative must differ from the genome and the ladder")
+        if set(ladder) & set(keys):
+            raise ConfigError(f"host {name}: a ladder reference is also one of the host's genomes")
+        hosts.append(HostSpec(name=name, genomes=genomes, ladder=list(ladder), indexes=list(indexes)))
     return Config(
         library_dir=Path(data["library_dir"]),
         index_dir=Path(data["index_dir"]),
@@ -181,6 +196,8 @@ def parse_config(data: dict[str, Any]) -> Config:
         fcs_gx_db=Path(data["fcs_gx_db"]),
         hosts=hosts,
         settings=merge_settings(data.get("settings")),
+        fcs_gx_stage=Path(data["fcs_gx_stage"]) if data.get("fcs_gx_stage") else None,
+        fcs_gx_db_build=str(data["fcs_gx_db_build"]) if data.get("fcs_gx_db_build") else None,
     )
 
 

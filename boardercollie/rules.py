@@ -63,8 +63,8 @@ class CompositionEvidence:
     cpg_oe: float
     cpg_oe_background_low: float    # background percentiles (conflict_background_percentiles)
     cpg_oe_background_high: float
-    coding_fraction: float
-    prokaryotic_rrna: bool
+    coding_fraction: float | None = None     # Prodigal; None until measured
+    prokaryotic_rrna: bool | None = None     # barrnap; None until measured
 
 
 @dataclass
@@ -172,7 +172,7 @@ def _conflict(r: Region, action: str, settings: dict) -> tuple[bool, str]:
     foreign_signs = []
     if c.cpg_oe > c.cpg_oe_background_high:
         foreign_signs.append(f"CpG o/e {c.cpg_oe:.3f} above host background ({c.cpg_oe_background_high:.3f})")
-    if c.coding_fraction >= settings["conflict_coding_min"]:
+    if c.coding_fraction is not None and c.coding_fraction >= settings["conflict_coding_min"]:
         foreign_signs.append(f"coding fraction {c.coding_fraction:.2f}")
     if c.prokaryotic_rrna:
         foreign_signs.append("prokaryotic rRNA gene")
