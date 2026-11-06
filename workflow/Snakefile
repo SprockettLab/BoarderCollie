@@ -220,8 +220,16 @@ rule trf:
     output:
         WORK / "{acc}" / "{key}" / "trf.ngs",
     shell:
-        # TRF exits non-zero even when it succeeds; the output is checked by the decide step.
-        "(cd $(dirname {output}) && trf $(basename {input}) 2 7 7 80 10 50 2000 -h -ngs > trf.ngs) || true; test -e {output}"
+        # No flagged regions: nothing to run. Otherwise TRF's exit status is not
+        # usable (it is non-zero on success), so its log is checked for errors.
+        r"""
+        if [ ! -s {input} ]; then
+          : > {output}; echo "no flagged regions" > {output}.log
+        else
+          (cd $(dirname {output}) && trf $(basename {input}) 2 7 7 80 10 50 2000 -h -ngs > trf.ngs 2> trf.ngs.log) || true
+          if grep -qi "error" {output}.log; then cat {output}.log >&2; exit 1; fi
+        fi
+        """
 
 
 rule copies_own:
