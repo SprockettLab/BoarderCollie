@@ -195,3 +195,10 @@ def test_combine_rejects_duplicate_names(tmp_path):
         out, members_out = str(tmp_path / "h.fna"), str(tmp_path / "m.tsv")
     with pytest.raises(ValueError):
         cmd_combine(Args)
+
+
+def test_taxonomy_cache_written_with_nothing_to_look_up(tmp_path):
+    from boardercollie.decide import lineage_lookup
+    cache = tmp_path / "tax.json"
+    lookup = lineage_lookup([], cache, fetch=lambda ids: {})
+    assert cache.exists() and lookup(816) == set()

@@ -33,7 +33,8 @@ def lineage_lookup(taxids, cache: Path, fetch=None):
             from .ncbi import taxonomy as fetch
         for k, v in fetch(missing).items():
             data[k] = set(v["parents"])
-        cache.write_text(json.dumps({k: sorted(v) for k, v in data.items()}, indent=1))
+    # Always written, even when there was nothing to look up, so every run has it.
+    cache.write_text(json.dumps({k: sorted(v) for k, v in data.items()}, indent=1))
     return lambda t: data.get(t, set())
 
 
