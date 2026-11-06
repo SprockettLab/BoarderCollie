@@ -59,7 +59,7 @@ def cmd_foreign(a):
             time.sleep(0.5)
 
 
-def cmd_mask(a):
+def cmd_without_flagged(a):
     """Copy a reference genome without every sequence that has any FCS-GX row."""
     from .fcs_report import read_candidates
     drop = {c.seq_id for c in read_candidates(a.report, a.taxonomy)}
@@ -157,7 +157,7 @@ def main(argv=None):
     s = sub.add_parser("foreign-controls"); s.set_defaults(f=cmd_foreign)
     s.add_argument("--tsv", required=True); s.add_argument("--out", required=True)
 
-    s = sub.add_parser("mask"); s.set_defaults(f=cmd_mask)
+    s = sub.add_parser("without-flagged"); s.set_defaults(f=cmd_without_flagged)
     for k in ("fasta", "report", "taxonomy", "out", "log"):
         s.add_argument(f"--{k}", required=True)
 

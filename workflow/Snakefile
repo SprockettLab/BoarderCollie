@@ -7,7 +7,7 @@
 # copies, decide (boardercollie.rules), clean with gx clean-genome, check.
 # Per host: join the cleaned genomes, build bowtie2 and minimap2 indexes.
 # Every reference genome (relatives and ladder) is fetched and screened too,
-# and is used only after removing every sequence FCS-GX reported in it.
+# and is used only as a copy without every sequence FCS-GX reported in it.
 
 import hashlib
 import json
@@ -142,16 +142,16 @@ rule screen:
         """
 
 
-rule mask_reference:
+rule reference_without_flagged:
     input:
         fasta=rules.fetch.output.fasta,
         report=rules.screen.output.report,
         taxonomy=rules.screen.output.taxonomy,
     output:
-        fasta=temp(WORK / "references" / GX / "{acc}.masked.fna"),
-        log=WORK / "references" / GX / "{acc}.masked.log",
+        fasta=temp(WORK / "references" / GX / "{acc}.without_flagged.fna"),
+        log=WORK / "references" / GX / "{acc}.without_flagged.log",
     shell:
-        "python -m boardercollie.cli mask --fasta {input.fasta} --report {input.report} "
+        "python -m boardercollie.cli without-flagged --fasta {input.fasta} --report {input.report} "
         "--taxonomy {input.taxonomy} --out {output.fasta} --log {output.log}"
 
 
@@ -204,7 +204,7 @@ rule flagged:
 rule align:
     input:
         queries=rules.queries.output,
-        ref=WORK / "references" / GX / "{ref}.masked.fna",
+        ref=WORK / "references" / GX / "{ref}.without_flagged.fna",
     output:
         WORK / "{acc}" / "{key}" / "align" / "{ref}.paf",
     threads: 32
@@ -250,7 +250,7 @@ rule copies_own:
 rule copies_ref:
     input:
         flagged=rules.flagged.output,
-        ref=WORK / "references" / GX / "{ref}.masked.fna",
+        ref=WORK / "references" / GX / "{ref}.without_flagged.fna",
     output:
         WORK / "{acc}" / "{key}" / "copies" / "{ref}.paf",
     threads: 32
