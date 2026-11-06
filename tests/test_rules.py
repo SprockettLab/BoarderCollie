@@ -4,7 +4,7 @@ import pytest
 
 from boardercollie.config import merge_settings
 from boardercollie.rules import (
-    TEST_APPLIED, TEST_NOT_APPLIED, Alignment, CompositionEvidence, Control, Region, RepeatEvidence, decide_genome,
+    TEST_APPLIED, TEST_NOT_APPLIED, TEST_NOT_NEEDED, Alignment, CompositionEvidence, Control, Region, RepeatEvidence, decide_genome,
 )
 
 RETROVIRIDAE = 11632
@@ -161,3 +161,10 @@ def test_thresholds_are_settings(settings):
     s = merge_settings({"host_like_min": 0.8})
     d = by_id(decide([region("a", [ladder(0.75)])], s))["a"]
     assert d.rule == "6"
+
+
+def test_genome_with_nothing_flagged(settings):
+    # No regions, so no host controls: this is not a failed control check.
+    result = decide([], settings, controls=[Control("bact", "foreign", [ladder(0.0)])])
+    assert result.status == "no flagged regions"
+    assert result.relative_alignment_test == TEST_NOT_NEEDED and result.decisions == []

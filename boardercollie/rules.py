@@ -39,6 +39,7 @@ from .repeats import unit_identity
 
 TEST_APPLIED = "applied"
 TEST_NOT_APPLIED = "not applied: host controls failed"
+TEST_NOT_NEEDED = "not needed: FCS-GX flagged no regions"
 FCS_REMOVING_ACTIONS = ("EXCLUDE", "TRIM", "FIX")
 
 
@@ -202,6 +203,9 @@ def decide_genome(
 ) -> GenomeResult:
     """Apply rules 1 to 6 to every flagged region of one genome."""
     passed, h_ok, h_n, f_ok, f_n = control_check(controls, settings)
+    if not regions:
+        # Nothing flagged: there is nothing to test and no host controls are drawn.
+        return GenomeResult(accession, "no flagged regions", TEST_NOT_NEEDED, h_ok, h_n, f_ok, f_n, [])
 
     if not passed:
         if settings["on_controls_failed"] == "stop":
