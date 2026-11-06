@@ -17,20 +17,20 @@ from typing import Any
 import yaml
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    # Rule R0: FCS-GX hits whose best-match tax-id falls in these NCBI taxa are
+    # Rule 2: FCS-GX hits whose best-match tax-id falls in these NCBI taxa are
     # kept untested. 11632 = Retroviridae (endogenous retroviruses).
     "keep_taxa": [11632],
     # Aligned fraction (segment bases in at least one alignment / length).
     "host_like_min": 0.5,
     "foreign_like_max": 0.1,
-    # Rule R1: a match to the closest relative counts only when the relative's
+    # Rule 3: a match to the closest relative counts only when the relative's
     # sequence extends at least this far beyond the match on one side.
     "embedded_flank_bp": 10000,
-    # Rule R2: host-lineage tandem repeat.
+    # Rule 4: host-lineage tandem repeat.
     "repeat_trf_min": 0.8,
     "repeat_copy_min_cover": 0.5,
     "repeat_lineage_rank": "genus",
-    # Rule R2b: repeat family.
+    # Rule 5: repeat family.
     "family_repeat_min": 0.5,
     "family_unit_min_identity": 0.8,
     "family_period_tolerance": 0.1,
@@ -40,7 +40,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "control_pass_min": 0.8,
     "control_max_n_frac": 0.1,
     "seed": 20261104,
-    # Rule C: what happens to a genome whose host controls fail.
+    # Rule 1: what happens to a genome whose host controls fail.
     "on_controls_failed": "fcs_only",
     # Supporting evidence (reported, never deciding).
     "conflict_coding_min": 0.7,

@@ -5,22 +5,26 @@ test: does it align to related host genomes (the closest relative and the
 reference ladder) as well as the same genome's own host DNA does? The rules,
 applied in this order, are:
 
-  C    Control check, per genome. At least control_pass_min of the host
-       controls must be host_like and every foreign control foreign_like.
-       If not, the relative-genome alignment test cannot be applied to this
-       genome; on_controls_failed decides what happens (fcs_only or stop).
-  R0   Endogenous retrovirus: FCS-GX's best-match tax-id lies within a taxon in
-       keep_taxa. Kept, untested.
-  R1   Host by alignment: aligned fraction >= host_like_min to a ladder
-       reference, or to the closest relative with the match embedded in a
-       longer relative sequence. Kept.
-  R2   Host-lineage tandem repeat: TRF covers >= repeat_trf_min of the region,
-       at least one copy in another assembly of the same lineage, no copy in
-       the most distant reference. Kept.
-  R2b  Repeat family: the region's main tandem repeat covers
-       >= family_repeat_min of it and its unit matches a unit confirmed by R1
-       or R2 in the same genome. Kept.
-  R3   Everything else. Removed.
+  1  Control check, per genome. At least control_pass_min of the host
+     controls must be host_like and every foreign control foreign_like.
+     If not, the relative-genome alignment test cannot be applied to this
+     genome; on_controls_failed decides what happens (fcs_only or stop).
+  2  Endogenous retrovirus: FCS-GX's best-match tax-id lies within a taxon in
+     keep_taxa. Kept, untested.
+  3  Host by alignment: aligned fraction >= host_like_min to a ladder
+     reference, or to the closest relative with the match embedded in a
+     longer relative sequence. Kept.
+  4  Host-lineage tandem repeat: TRF covers >= repeat_trf_min of the region,
+     at least one copy in another assembly of the same lineage, no copy in
+     the most distant reference. Kept.
+  5  Repeat family: the region's main tandem repeat covers
+     >= family_repeat_min of it and its unit matches a unit confirmed by
+     rule 3 or 4 in the same genome. Kept.
+  6  Everything else. Removed.
+
+The rule column of decisions.tsv holds the number of the rule that decided
+each region, or "fcs_only" when rule 1 failed and FCS-GX's own action was
+applied.
 
 Composition and gene evidence never decide. It is compared with the decision
 and any disagreement is reported in evidence_conflict.
@@ -196,7 +200,7 @@ def decide_genome(
     settings: dict,
     lineage: Callable[[int], set[int]],
 ) -> GenomeResult:
-    """Apply rules C, R0, R1, R2, R2b and R3 to every flagged region of one genome."""
+    """Apply rules 1 to 6 to every flagged region of one genome."""
     passed, h_ok, h_n, f_ok, f_n = control_check(controls, settings)
 
     if not passed:
@@ -205,12 +209,12 @@ def decide_genome(
         out = []
         for r in regions:
             if is_kept_taxon(r.fcs_top_taxid, settings, lineage):
-                out.append(_decision(r, "R0", "host", "keep", TEST_NOT_APPLIED, settings))
+                out.append(_decision(r, "2", "host", "keep", TEST_NOT_APPLIED, settings))
             elif r.fcs_action in FCS_REMOVING_ACTIONS:
-                out.append(_decision(r, "FCS", "foreign", "remove", TEST_NOT_APPLIED, settings,
+                out.append(_decision(r, "fcs_only", "foreign", "remove", TEST_NOT_APPLIED, settings,
                                      note=f"FCS-GX action {r.fcs_action} applied without the relative-genome alignment test"))
             else:
-                out.append(_decision(r, "FCS", "host", "keep", TEST_NOT_APPLIED, settings,
+                out.append(_decision(r, "fcs_only", "host", "keep", TEST_NOT_APPLIED, settings,
                                      note=f"FCS-GX action {r.fcs_action}: no removal"))
         return GenomeResult(accession, "fcs_only", TEST_NOT_APPLIED, h_ok, h_n, f_ok, f_n, out)
 
@@ -218,17 +222,17 @@ def decide_genome(
     pending: list[Region] = []
     for r in regions:
         if is_kept_taxon(r.fcs_top_taxid, settings, lineage):
-            decided[r.region_id] = _decision(r, "R0", "host", "keep", TEST_APPLIED, settings)
+            decided[r.region_id] = _decision(r, "2", "host", "keep", TEST_APPLIED, settings)
         elif _host_by_alignment(r, settings):
-            decided[r.region_id] = _decision(r, "R1", "host", "keep", TEST_APPLIED, settings)
+            decided[r.region_id] = _decision(r, "3", "host", "keep", TEST_APPLIED, settings)
         elif _host_lineage_repeat(r, settings):
-            decided[r.region_id] = _decision(r, "R2", "host", "keep", TEST_APPLIED, settings)
+            decided[r.region_id] = _decision(r, "4", "host", "keep", TEST_APPLIED, settings)
         else:
             pending.append(r)
 
-    # R2b: only units confirmed by R1 or R2 count, so family members cannot vouch for each other.
+    # Rule 5: only units confirmed by rule 3 or 4 count, so family members cannot vouch for each other.
     confirmed = [d.region.repeats.main_unit for d in decided.values()
-                 if d.rule in ("R1", "R2") and d.region.repeats and d.region.repeats.main_unit]
+                 if d.rule in ("3", "4") and d.region.repeats and d.region.repeats.main_unit]
     for r in pending:
         x = r.repeats
         match = None
@@ -238,10 +242,10 @@ def decide_genome(
             if best[1] >= settings["family_unit_min_identity"]:
                 match = best
         if match:
-            decided[r.region_id] = _decision(r, "R2b", "host", "keep", TEST_APPLIED, settings,
+            decided[r.region_id] = _decision(r, "5", "host", "keep", TEST_APPLIED, settings,
                                              note=f"unit identity {match[1]:.3f} to confirmed unit of {len(match[0])} bp")
         else:
-            decided[r.region_id] = _decision(r, "R3", "foreign", "remove", TEST_APPLIED, settings)
+            decided[r.region_id] = _decision(r, "6", "foreign", "remove", TEST_APPLIED, settings)
 
     return GenomeResult(accession, "decided", TEST_APPLIED, h_ok, h_n, f_ok, f_n,
                         [decided[r.region_id] for r in regions])

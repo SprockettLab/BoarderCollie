@@ -48,44 +48,44 @@ def by_id(result):
 
 def test_foreign_region_is_removed(settings):
     d = by_id(decide([region("a", [ladder(0.0), relative(0.0, False)])], settings))["a"]
-    assert (d.rule, d.action, d.align_class) == ("R3", "remove", "foreign_like")
+    assert (d.rule, d.action, d.align_class) == ("6", "remove", "foreign_like")
     assert d.relative_alignment_test == TEST_APPLIED
 
 
 def test_partial_region_is_removed(settings):
     d = by_id(decide([region("a", [ladder(0.3)])], settings))["a"]
-    assert (d.rule, d.action, d.align_class) == ("R3", "remove", "partial")
+    assert (d.rule, d.action, d.align_class) == ("6", "remove", "partial")
 
 
 def test_ladder_alignment_keeps(settings):
     d = by_id(decide([region("a", [ladder(0.75)])], settings))["a"]
-    assert (d.rule, d.action) == ("R1", "keep")
+    assert (d.rule, d.action) == ("3", "keep")
 
 
 def test_relative_alignment_keeps_only_when_embedded(settings):
     res = by_id(decide([region("emb", [relative(1.0, True)]), region("short", [relative(1.0, False)])], settings))
-    assert (res["emb"].rule, res["emb"].action) == ("R1", "keep")
-    assert (res["short"].rule, res["short"].action) == ("R3", "remove")
+    assert (res["emb"].rule, res["emb"].action) == ("3", "keep")
+    assert (res["short"].rule, res["short"].action) == ("6", "remove")
 
 
 def test_retrovirus_kept_by_taxonomy_not_name(settings):
     d = by_id(decide([region("erv", [ladder(0.0)], taxid=39068, tax="Simian retrovirus 2")], settings))["erv"]
-    assert (d.rule, d.action) == ("R0", "keep")
-    # A name that says "retrovirus" but a tax-id outside Retroviridae is not kept by R0.
+    assert (d.rule, d.action) == ("2", "keep")
+    # A name that says "retrovirus" but a tax-id outside Retroviridae is not kept by rule 2.
     d = by_id(decide([region("fake", [ladder(0.0)], taxid=816, tax="not a retrovirus")], settings))["fake"]
-    assert d.rule == "R3"
+    assert d.rule == "6"
 
 
 def test_host_lineage_repeat_keeps(settings):
     rep = RepeatEvidence(0.95, 0.95, "ACGTTGCAACGTTGCA", lineage_copies=2, distant_copies=0)
     d = by_id(decide([region("rep", [relative(1.0, False)], repeats=rep)], settings))["rep"]
-    assert (d.rule, d.action) == ("R2", "keep")
+    assert (d.rule, d.action) == ("4", "keep")
 
 
 def test_repeat_with_copy_in_distant_reference_is_not_r2(settings):
     rep = RepeatEvidence(0.95, 0.95, "ACGT", lineage_copies=2, distant_copies=1)
     d = by_id(decide([region("rep", [ladder(0.0)], repeats=rep)], settings))["rep"]
-    assert d.rule == "R3"
+    assert d.rule == "6"
 
 
 def test_repeat_family_rotation_and_reverse_complement(settings):
@@ -95,22 +95,22 @@ def test_repeat_family_rotation_and_reverse_complement(settings):
     member = RepeatEvidence(1.0, 1.0, rotated_rc, lineage_copies=0, distant_copies=0)
     res = by_id(decide([region("conf", [ladder(0.0)], repeats=confirmed),
                         region("mem", [ladder(0.0)], repeats=member)], settings))
-    assert res["conf"].rule == "R2"
-    assert (res["mem"].rule, res["mem"].action) == ("R2b", "keep")
+    assert res["conf"].rule == "4"
+    assert (res["mem"].rule, res["mem"].action) == ("5", "keep")
 
 
 def test_repeat_family_needs_main_repeat_cover(settings):
     confirmed = RepeatEvidence(1.0, 1.0, "ACGTTGCAAGGCTTAC", 1, 0)
     weak = RepeatEvidence(0.3, 0.3, "ACGTTGCAAGGCTTAC", 0, 0)
     res = by_id(decide([region("conf", repeats=confirmed), region("weak", repeats=weak)], settings))
-    assert res["weak"].rule == "R3"
+    assert res["weak"].rule == "6"
 
 
 def test_repeat_family_members_cannot_vouch_for_each_other(settings):
-    # Two identical units, neither confirmed by R1 or R2: both removed.
+    # Two identical units, neither confirmed by rule 3 or 4: both removed.
     a = RepeatEvidence(1.0, 1.0, "ACGTTGCAAGGCTTAC", 0, 0)
     res = by_id(decide([region("x", repeats=a), region("y", repeats=a)], settings))
-    assert res["x"].rule == res["y"].rule == "R3"
+    assert res["x"].rule == res["y"].rule == "6"
 
 
 def test_controls_failed_fcs_only_is_labelled(settings):
@@ -121,9 +121,9 @@ def test_controls_failed_fcs_only_is_labelled(settings):
     assert result.status == "fcs_only"
     assert result.relative_alignment_test == TEST_NOT_APPLIED
     d = by_id(result)
-    assert (d["a"].rule, d["a"].action) == ("FCS", "remove")
-    assert (d["b"].rule, d["b"].action) == ("FCS", "keep")
-    assert (d["erv"].rule, d["erv"].action) == ("R0", "keep")
+    assert (d["a"].rule, d["a"].action) == ("fcs_only", "remove")
+    assert (d["b"].rule, d["b"].action) == ("fcs_only", "keep")
+    assert (d["erv"].rule, d["erv"].action) == ("2", "keep")
     assert all(x.relative_alignment_test == TEST_NOT_APPLIED for x in result.decisions)
 
 
@@ -160,4 +160,4 @@ def test_evidence_conflict_reported_but_not_deciding(settings):
 def test_thresholds_are_settings(settings):
     s = merge_settings({"host_like_min": 0.8})
     d = by_id(decide([region("a", [ladder(0.75)])], s))["a"]
-    assert d.rule == "R3"
+    assert d.rule == "6"

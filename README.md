@@ -11,12 +11,12 @@ Status: in development; not yet ready for use.
 1. **Screen** each genome with NCBI [FCS-GX](https://github.com/ncbi/fcs-gx).
 2. **Test** every flagged region with the relative-genome alignment test: does the region align to related host genomes as well as the same genome's own host DNA does? Random host windows (host controls) and known foreign sequences (foreign controls) calibrate the test for each genome.
 3. **Decide** which genomic regions are kept and which are discarded by the following configurable rules:
-   - **C**: the genome's host controls must align and its foreign controls must not; otherwise the relative-genome alignment test is not applied to that genome, and the outputs say so.
-   - **R0**: regions whose best FCS-GX match lies in Retroviridae (endogenous retroviruses) are kept.
-   - **R1**: regions that align to related host genomes are kept.
-   - **R2**: tandem repeats with copies in other genomes of the same lineage, and none in a distant reference, are kept.
-   - **R2b**: tandem repeats whose repeat unit matches one kept by R1 or R2 are kept.
-   - **R3**: everything else is removed.
+   1. The genome's host controls must align and its foreign controls must not; otherwise the relative-genome alignment test is not applied to that genome, and the outputs say so.
+   2. Regions whose best FCS-GX match lies in Retroviridae (endogenous retroviruses) are kept.
+   3. Regions that align to related host genomes are kept.
+   4. Tandem repeats with copies in other genomes of the same lineage, and none in a distant reference, are kept.
+   5. Tandem repeats whose repeat unit matches one kept by rule 3 or 4 are kept.
+   6. Everything else is removed.
 4. **Clean** each genome with FCS-GX's own cleaning tool, applying only the removals.
 5. **Combine** the cleaned genomes of a host into one reference and build bowtie2 and minimap2 indexes.
 

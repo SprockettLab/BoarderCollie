@@ -15,7 +15,7 @@ fcs_gx_db: /path/to/fcs_gx/gxdb   # ideally a fast local copy for the run: scrip
 # Each genome is an NCBI assembly accession with its closest relative (until
 # automatic choice from the NCBI taxonomy is added), or a local FASTA with its
 # NCBI tax-id. The ladder lists reference genomes at increasing distance; the
-# last one is the distant reference used by rule R2.
+# last one is the distant reference used by rule 4.
 hosts:
   - name: Chlorocebus_spp
     genomes:
@@ -35,12 +35,12 @@ settings:
   host_like_min: 0.5               # aligned fraction for host_like
   foreign_like_max: 0.1            # aligned fraction below which a region is foreign_like
   embedded_flank_bp: 10000         # a relative match counts when the relative sequence extends this far beyond it on one side
-  repeat_trf_min: 0.8              # rule R2: fraction of a region in tandem repeats
+  repeat_trf_min: 0.8              # rule 4: fraction of a region in tandem repeats
   repeat_copy_min_cover: 0.5       # an alignment covering this fraction of a region counts as a copy
-  repeat_lineage_rank: genus       # rule R2: where copies are looked for
-  family_repeat_min: 0.5           # rule R2b: the main repeat must cover this fraction of the region
-  family_unit_min_identity: 0.8    # rule R2b: unit identity to a confirmed unit
-  family_period_tolerance: 0.1     # rule R2b: unit lengths may differ by this fraction
+  repeat_lineage_rank: genus       # rule 4: where copies are looked for
+  family_repeat_min: 0.5           # rule 5: the main repeat must cover this fraction of the region
+  family_unit_min_identity: 0.8    # rule 5: unit identity to a confirmed unit
+  family_period_tolerance: 0.1     # rule 5: unit lengths may differ by this fraction
   controls_per_segment: 3          # host controls per flagged region (alignment)
   background_per_segment: 100      # background windows per flagged region (composition)
   control_pass_min: 0.8            # share of host controls that must be host_like

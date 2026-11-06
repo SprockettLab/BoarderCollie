@@ -136,8 +136,8 @@ def test_decide_from_files_end_to_end(genome, tmp_path):
                             fetch_taxonomy=lambda ids: {i: {"parents": set(), "ranks": {}, "name": ""} for i in ids})
     assert res.status == "decided"
     d = {x.region.seq_id: x for x in res.decisions}
-    assert (d["bact1"].rule, d["bact1"].action) == ("R3", "remove")
-    assert (d["chr2"].rule, d["chr2"].action) == ("R1", "keep")
+    assert (d["bact1"].rule, d["bact1"].action) == ("6", "remove")
+    assert (d["chr2"].rule, d["chr2"].action) == ("3", "keep")
     removals = read_tsv(rem)
     assert [(r["seq_id"], r["start"], r["end"]) for r in removals] == [("bact1", "1", "3000")]
 
