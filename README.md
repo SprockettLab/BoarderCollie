@@ -8,9 +8,9 @@ Status: in development; not yet ready for use.
 
 ## How it works
 
-1. **Screen** each genome with NCBI FCS-GX.
+1. **Screen** each genome with NCBI [FCS-GX](https://github.com/ncbi/fcs-gx).
 2. **Test** every flagged region with the relative-genome alignment test: does the region align to related host genomes as well as the same genome's own host DNA does? Random host windows (host controls) and known foreign sequences (foreign controls) calibrate the test for each genome.
-3. **Decide** by written rules with configurable thresholds:
+3. **Decide** which genomic regions are kept and which are discarded by the following configurable rules:
    - **C**: the genome's host controls must align and its foreign controls must not; otherwise the relative-genome alignment test is not applied to that genome, and the outputs say so.
    - **R0**: regions whose best FCS-GX match lies in Retroviridae (endogenous retroviruses) are kept.
    - **R1**: regions that align to related host genomes are kept.
