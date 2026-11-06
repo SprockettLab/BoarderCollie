@@ -202,3 +202,25 @@ def test_taxonomy_cache_written_with_nothing_to_look_up(tmp_path):
     cache = tmp_path / "tax.json"
     lookup = lineage_lookup([], cache, fetch=lambda ids: {})
     assert cache.exists() and lookup(816) == set()
+
+
+def test_removed_fasta_and_gx_log(genome, tmp_path):
+    from boardercollie.clean import write_removed
+    path, _, _, seqs = genome
+    rem = tmp_path / "removals.tsv"
+    rem.write_text("region_id\tseq_id\tstart\tend\tlength\tseq_len\tfcs_action\tsource\n"
+                   "R1\tbact1\t1\t3000\t3000\t3000\tEXCLUDE\taction_report\n"
+                   "R3\tchr1\t101\t200\t100\t20000\tnone\ttaxonomy_report\n")
+    removed = tmp_path / "removed.fna"
+    assert write_removed(path, rem, removed, tmp_path / "g.fai") == 3100
+    assert read_fasta(removed)["chr1:101-200"] == seqs["chr1"][100:200]
+    clean = tmp_path / "clean.fna"
+    write_fasta([("chr1_a", seqs["chr1"][:100]), ("chr1_b", seqs["chr1"][200:]), ("chr2", seqs["chr2"]),
+                 ("chr3", seqs["chr3"])], clean)
+    log = tmp_path / "gx.log"
+    log.write_text("Applied 2 actions; 1 seqs dropped; 3100 bps dropped; 0 bps lowercased; 0 bps hardmasked.\n")
+    acc = check_accounting(path, clean, removed, rem, log)
+    assert acc["gx_bp_dropped"] == 3100 and acc["gx_bp_hardmasked"] == 0
+    log.write_text("Applied 2 actions; 1 seqs dropped; 3000 bps dropped; 0 bps lowercased; 100 bps hardmasked.\n")
+    with pytest.raises(ValueError):
+        check_accounting(path, clean, removed, rem, log)

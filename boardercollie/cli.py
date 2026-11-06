@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from . import __version__
-from .clean import check_accounting, filtered_report
+from .clean import check_accounting, filtered_report, write_removed
 from .config import load_config
 from .decide import decide_from_files
 from .extract import extract
@@ -115,7 +115,9 @@ def cmd_filter_report(a):
 
 
 def cmd_check_clean(a):
-    acc = check_accounting(Path(a.original), Path(a.clean), Path(a.removed), Path(a.removals))
+    write_removed(Path(a.original), Path(a.removals), Path(a.removed), Path(a.fai))
+    acc = check_accounting(Path(a.original), Path(a.clean), Path(a.removed), Path(a.removals),
+                           Path(a.gx_log) if a.gx_log else None)
     rec = {"boardercollie": __version__, "accession": a.accession, "run_key": a.run_key,
            "settings_hash": a.settings_hash, "status_file": a.decisions,
            "original_md5": md5(Path(a.original)), "clean_md5": md5(Path(a.clean)),
@@ -176,8 +178,9 @@ def main(argv=None):
         s.add_argument(f"--{k}", required=True)
 
     s = sub.add_parser("check-clean"); s.set_defaults(f=cmd_check_clean)
-    for k in ("accession", "original", "clean", "removed", "removals", "decisions", "run-key", "settings-hash", "out"):
+    for k in ("accession", "original", "clean", "removed", "removals", "decisions", "run-key", "settings-hash", "out", "fai"):
         s.add_argument(f"--{k}", required=True)
+    s.add_argument("--gx-log", default=None, help="gx clean-genome log; absent when nothing was removed")
 
     s = sub.add_parser("combine"); s.set_defaults(f=cmd_combine)
     s.add_argument("--accessions", nargs="+", required=True); s.add_argument("--fastas", nargs="+", required=True)

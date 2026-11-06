@@ -11,6 +11,7 @@ the original.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from .decide import read_tsv
@@ -59,14 +60,43 @@ def fasta_bases(path: Path) -> tuple[int, int]:
     return n, b
 
 
-def check_accounting(original: Path, clean: Path, removed: Path, removals: Path) -> dict:
+def write_removed(original: Path, removals: Path, out: Path, fai: Path) -> int:
+    """Every removed region, cut from the original genome (FCS-GX's own
+    contamination FASTA holds only whole dropped sequences, not trimmed or
+    cut pieces). Returns the bases written."""
+    from .fasta import IndexedFasta, write_fasta
+    fa = IndexedFasta(original, fai)
+    recs = [(f"{r['seq_id']}:{r['start']}-{r['end']} {r['region_id']}",
+             fa.fetch(r["seq_id"], int(r["start"]), int(r["end"]))) for r in read_tsv(removals)]
+    fa.close()
+    write_fasta(recs, out)
+    return sum(len(s) for _, s in recs)
+
+
+GX_LOG = re.compile(r"(\d+) bps dropped; (\d+) bps lowercased; (\d+) bps hardmasked")
+
+
+def check_accounting(original: Path, clean: Path, removed: Path, removals: Path, gx_log: Path | None = None) -> dict:
+    """original bp - clean bp must equal the summed removal lengths, the
+    removed FASTA must hold exactly those bases, and FCS-GX must report the
+    same number of bases dropped and none lowercased or hardmasked."""
     want = sum(int(r["length"]) for r in read_tsv(removals))
     on, ob = fasta_bases(original)
     cn, cb = fasta_bases(clean)
     rn, rb = fasta_bases(removed) if removed.exists() else (0, 0)
+    if ob - cb != want:
+        raise ValueError(f"original {ob} - clean {cb} = {ob - cb} bp, expected {want} bp (sum of removal lengths)")
     if rb != want:
-        raise ValueError(f"removed {rb} bp, expected {want} bp (sum of removal lengths)")
-    if cb + rb != ob:
-        raise ValueError(f"clean {cb} + removed {rb} != original {ob} bp")
+        raise ValueError(f"removed FASTA holds {rb} bp, expected {want} bp")
+    gx = {}
+    if gx_log is not None and gx_log.exists():
+        m = GX_LOG.search(gx_log.read_text())
+        if not m:
+            raise ValueError(f"cannot read the bases dropped, lowercased and hardmasked from {gx_log}")
+        dropped, lower, hard = map(int, m.groups())
+        if dropped != want or lower or hard:
+            raise ValueError(f"FCS-GX reports {dropped} bp dropped, {lower} lowercased, {hard} hardmasked; "
+                             f"expected {want} dropped and none lowercased or hardmasked")
+        gx = {"gx_bp_dropped": dropped, "gx_bp_lowercased": lower, "gx_bp_hardmasked": hard}
     return {"original_sequences": on, "original_bp": ob, "clean_sequences": cn, "clean_bp": cb,
-            "removed_sequences": rn, "removed_bp": rb}
+            "removed_regions": rn, "removed_bp": rb, **gx}

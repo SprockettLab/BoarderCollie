@@ -321,6 +321,9 @@ rule clean:
         clean=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "{acc}_clean.fna",
         removed=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "{acc}_removed.fna",
         record=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "run.json",
+    params:
+        gxlog=lambda w: LIB / "genomes" / w.acc / "runs" / w.key / "gx_clean_genome.log",
+        fai=lambda w: WORK / w.acc / w.key / "genome.fai",
     resources:
         mem_mb=32000,
     shell:
@@ -328,13 +331,16 @@ rule clean:
         python -m boardercollie.cli filter-report --report {input.report} --removals {input.removals} --out {output.applied}
         if grep -qv '^#' {output.applied}; then
           gx clean-genome --input={input.fasta} --action-report={output.applied} \
-            --output={output.clean}.partial --contam-fasta-out={output.removed} > {output.record}.clean.log 2>&1
+            --output={output.clean}.partial --contam-fasta-out={output.clean}.gx_contam.fna > {params.gxlog} 2>&1
           mv {output.clean}.partial {output.clean}
+          rm -f {output.clean}.gx_contam.fna
+          gxlog="--gx-log {params.gxlog}"
         else
-          cp {input.fasta} {output.clean}; : > {output.removed}
+          cp {input.fasta} {output.clean}; gxlog=""
         fi
+        # The removed FASTA is cut from the original by BoarderCollie, so it holds every removed region.
         python -m boardercollie.cli check-clean --accession {wildcards.acc} --original {input.fasta} \
-          --clean {output.clean} --removed {output.removed} --removals {input.removals} \
+          --clean {output.clean} --removed {output.removed} --removals {input.removals} --fai {params.fai} $gxlog \
           --decisions {input.decisions} --run-key {wildcards.key} --settings-hash {SETTINGS_HASH} --out {output.record}
         """
 
