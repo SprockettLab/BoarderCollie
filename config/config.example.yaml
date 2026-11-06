@@ -5,12 +5,8 @@
 library_dir: /path/to/host_genomes
 index_dir: /path/to/dbs
 work_dir: /path/to/scratch/boardercollie
-fcs_gx_db: /path/to/fcs_gx/gxdb
+fcs_gx_db: /path/to/fcs_gx/gxdb   # ideally a fast local copy for the run: scripts/stage_fcs_gx_db.sh
 
-# Optional: directories to copy the FCS-GX database to for each screening job,
-# tried in order; the first with room is used, else the database is read in
-# place. FCS-GX is far faster with its database in memory or on local disk.
-fcs_gx_stage: [/dev/shm, /local]
 # Optional: the database build date, if the database folder has no all.meta.jsonl.
 # fcs_gx_db_build: "2023-01-24"
 

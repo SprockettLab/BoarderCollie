@@ -35,7 +35,8 @@ mamba env create -f workflow/envs/boardercollie.yaml -p ./env
 ./env/bin/snakemake -s workflow/Snakefile --configfile config.yaml --cores 64 --resources mem_mb=740000
 ```
 
-FCS-GX needs its database (about 520 GB) in memory, so screening runs one genome at a time on a large-memory node; `fcs_gx_stage` copies the database to fast local storage first.
+FCS-GX needs its database (about 520 GB) in memory, so screening runs one genome at a time on a large-memory node.
+It is much faster when the database is on local storage: copy it once per run with `scripts/stage_fcs_gx_db.sh` and pass the copy with `--config fcs_gx_db=<copy>`, deleting the copy afterwards.
 
 Outputs, under `library_dir`:
 
