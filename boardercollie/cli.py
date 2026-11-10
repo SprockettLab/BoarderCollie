@@ -45,6 +45,21 @@ def cmd_taxid(a):
     print(json.loads(Path(a.record).read_text())["tax_id"])
 
 
+def cmd_import_fcs_reports(a):
+    """Use FCS-GX reports made earlier: check them against the genome, then copy them in."""
+    from .fcs_report import ReportError
+    from .precomputed import check_reports
+    tax_id = json.loads(Path(a.record).read_text()).get("tax_id")
+    rec = check_reports(a.action, a.taxonomy, a.fasta, int(tax_id) if tax_id is not None else None)
+    if rec["database_build"] and rec["database_build"] != a.build:
+        raise ReportError(f"{a.action} names database build {rec['database_build']}; this run uses {a.build}")
+    shutil.copyfile(a.action, a.out_report)
+    shutil.copyfile(a.taxonomy, a.out_taxonomy)
+    rec.update(boardercollie=__version__, genome=a.fasta, genome_md5=md5(Path(a.fasta)), run_database_build=a.build,
+               imported=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+    Path(a.out_record).write_text(json.dumps(rec, indent=1))
+
+
 def cmd_foreign(a):
     lines = [l.split("\t") for l in Path(a.tsv).read_text().splitlines() if l and not l.startswith("#")]
     with open(a.out, "w") as fh:
@@ -150,10 +165,12 @@ def cmd_combine(a):
 def cmd_report(a):
     from .report import write_host_report
     genomes = []
-    for spec in a.genome:  # accession|decisions|run|record|relative|ladder (comma-separated); "-" for none
-        acc, dec, run, rec, rel, lad = spec.split("|")
+    # accession|decisions|run|record|relative|ladder (comma-separated)|screen; "-" for none
+    for spec in a.genome:
+        acc, dec, run, rec, rel, lad, screen = spec.split("|")
         genomes.append({"accession": acc, "decisions": None if dec == "-" else dec, "run": run, "record": rec,
-                        "relative": None if rel == "-" else rel, "ladder": [] if lad == "-" else lad.split(",")})
+                        "relative": None if rel == "-" else rel, "ladder": [] if lad == "-" else lad.split(","),
+                        "screen": None if screen == "-" else screen})
     write_host_report(a.host, genomes, Path(a.out_regions), Path(a.out_genomes))
 
 
@@ -166,6 +183,11 @@ def main(argv=None):
     s.add_argument("--out-fasta", required=True); s.add_argument("--out-record", required=True)
 
     s = sub.add_parser("taxid"); s.set_defaults(f=cmd_taxid); s.add_argument("record")
+
+    s = sub.add_parser("import-fcs-reports", help="check FCS-GX reports made earlier against the genome and copy them")
+    s.set_defaults(f=cmd_import_fcs_reports)
+    for k in ("fasta", "record", "action", "taxonomy", "build", "out-report", "out-taxonomy", "out-record"):
+        s.add_argument(f"--{k}", required=True)
 
     s = sub.add_parser("foreign-controls"); s.set_defaults(f=cmd_foreign)
     s.add_argument("--tsv", required=True); s.add_argument("--out", required=True)
@@ -207,7 +229,8 @@ def main(argv=None):
 
     s = sub.add_parser("report"); s.set_defaults(f=cmd_report)
     s.add_argument("--host", required=True)
-    s.add_argument("--genome", action="append", required=True, help="accession|decisions|run|record|relative|ladder")
+    s.add_argument("--genome", action="append", required=True,
+                   help="accession|decisions|run|record|relative|ladder|screen")
     s.add_argument("--out-regions", required=True); s.add_argument("--out-genomes", required=True)
 
     a = p.parse_args(argv)

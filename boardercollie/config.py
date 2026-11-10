@@ -114,6 +114,9 @@ class Config:
     hosts: list[HostSpec]
     settings: dict[str, Any]
     fcs_gx_db_build: str | None = None
+    # A folder of FCS-GX reports made earlier (boardercollie.precomputed); genomes
+    # with reports there are not screened again.
+    fcs_gx_reports: Path | None = None
 
     def settings_hash(self) -> str:
         """Short hash of the settings, part of every result's run key."""
@@ -194,10 +197,15 @@ def _genome(entry: Any, host: str) -> GenomeSpec:
 
 def parse_config(data: dict[str, Any]) -> Config:
     settings = merge_settings(data.get("settings"))
-    for key in ("library_dir", "index_dir", "work_dir", "hosts") + (() if settings["download_only"] else ("fcs_gx_db",)):
+    for key in ("library_dir", "index_dir", "work_dir", "hosts"):
         if key not in data:
             raise ConfigError(f"missing required key: {key}")
-    unknown = set(data) - {"library_dir", "index_dir", "work_dir", "fcs_gx_db", "fcs_gx_db_build", "hosts", "settings"}
+    # The FCS-GX database is needed unless nothing is screened or reports made earlier
+    # are given; whether those reports cover every genome is checked when the workflow starts.
+    if not settings["download_only"] and not data.get("fcs_gx_db") and not data.get("fcs_gx_reports"):
+        raise ConfigError("missing required key: fcs_gx_db (or fcs_gx_reports, a folder of FCS-GX reports made earlier)")
+    unknown = set(data) - {"library_dir", "index_dir", "work_dir", "fcs_gx_db", "fcs_gx_db_build", "fcs_gx_reports",
+                           "hosts", "settings"}
     if unknown:
         raise ConfigError(f"unknown top-level keys: {sorted(unknown)}")
     if not isinstance(data["hosts"], list) or not data["hosts"]:
@@ -242,6 +250,7 @@ def parse_config(data: dict[str, Any]) -> Config:
         hosts=hosts,
         settings=settings,
         fcs_gx_db_build=str(data["fcs_gx_db_build"]) if data.get("fcs_gx_db_build") else None,
+        fcs_gx_reports=Path(data["fcs_gx_reports"]) if data.get("fcs_gx_reports") else None,
     )
 
 
