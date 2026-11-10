@@ -23,6 +23,16 @@ from pathlib import Path
 
 import yaml
 
+# The repository this Snakefile belongs to. When another workflow (MAGmaker) loads
+# this one as a Snakemake module, the boardercollie package is taken from here, both
+# when the workflow is read and in every step (through PYTHONPATH), so it need not be
+# installed in the calling workflow's environments.
+REPO = Path(workflow.current_basedir).parent.resolve()
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
+os.environ["PYTHONPATH"] = os.pathsep.join([str(REPO)] + [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+                                                           if p and p != str(REPO)])
+
 from boardercollie import __version__
 from boardercollie.config import parse_config, settings_hash
 from boardercollie.precomputed import build_date, find_reports, reports_hash
@@ -119,7 +129,7 @@ onsuccess:
 
 onerror:
     log_row("run_finish", status=1, detail=f"a step failed; Snakemake log: {log}")
-RES = Path(workflow.basedir).parent / "resources"
+RES = REPO / "resources"
 # The config as used, saved once per run key set; every step reads this copy.
 CONFIGFILE = WORK / "config.used.yaml"
 CONFIGFILE.parent.mkdir(parents=True, exist_ok=True)
@@ -241,6 +251,8 @@ for h in CFG.hosts:
         TARGETS.append(IDX / "bt2" / h.name / hk / "index_done.txt")
     if "minimap2" in h.indexes:
         TARGETS.append(IDX / "minimap2" / h.name / hk / f"{h.name}.map-ont.mmi")
+    if h.reference_out:
+        TARGETS.append(h.reference_out)
 
 wildcard_constraints:
     acc="[^/]+",
@@ -255,6 +267,8 @@ rule all:
 
 
 rule fetch:
+    conda:
+        "envs/boardercollie.yaml"
     output:
         fasta=LIB / "genomes" / "{acc}" / "original" / "{acc}.fna",
         record=LIB / "genomes" / "{acc}" / "original" / "record.json",
@@ -269,6 +283,8 @@ rule fetch:
 
 
 rule screen:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         fasta=rules.fetch.output.fasta,
         record=rules.fetch.output.record,
@@ -299,6 +315,8 @@ rule screen:
 
 
 rule screen_precomputed:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         fasta=rules.fetch.output.fasta,
         record=rules.fetch.output.record,
@@ -318,6 +336,8 @@ rule screen_precomputed:
 
 
 rule reference_without_flagged:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         fasta=rules.fetch.output.fasta,
         report=lambda w: screen_files(w.acc)["report"],
@@ -332,6 +352,8 @@ rule reference_without_flagged:
 
 
 rule foreign_controls:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         RES / "foreign_controls.tsv",
     output:
@@ -342,6 +364,8 @@ rule foreign_controls:
 
 
 rule extract:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         fasta=rules.fetch.output.fasta,
         report=lambda w: screen_files(w.acc)["report"],
@@ -361,6 +385,8 @@ rule extract:
 
 
 rule queries:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         segments=rules.extract.output.fasta,
         foreign=rules.foreign_controls.output,
@@ -372,6 +398,8 @@ rule queries:
 
 
 rule flagged:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         rules.extract.output.fasta,
     output:
@@ -382,6 +410,8 @@ rule flagged:
 
 
 rule align:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         queries=rules.queries.output,
         ref=WORK / "references" / GX / "{ref}.without_flagged.fna",
@@ -396,6 +426,8 @@ rule align:
 
 
 rule trf:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         rules.flagged.output,
     output:
@@ -415,6 +447,8 @@ rule trf:
 
 
 rule copies_own:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         flagged=rules.flagged.output,
         genome=rules.fetch.output.fasta,
@@ -431,6 +465,8 @@ rule copies_own:
 
 
 rule copies_ref:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         flagged=rules.flagged.output,
         ref=WORK / "references" / GX / "{ref}.without_flagged.fna",
@@ -491,6 +527,8 @@ def decide_args(w):
 
 
 rule decide:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         unpack(decide_inputs),
     output:
@@ -510,6 +548,8 @@ rule decide:
 
 
 rule clean:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         fasta=LIB / "genomes" / "{acc}" / "original" / "{acc}.fna",
         report=lambda w: screen_files(w.acc)["report"],
@@ -546,6 +586,8 @@ rule clean:
 
 
 rule combine:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         clean=lambda w: [member_files(g.key)[0] for g in HOSTS[w.host].genomes],
         records=lambda w: [member_files(g.key)[1] for g in HOSTS[w.host].genomes],
@@ -578,6 +620,8 @@ def report_spec(acc):
 
 
 rule report:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         members=rules.combine.output.members,
         checks=lambda w: [G(g.key) / "fcs_gx" / "precomputed" / PHASH[g.key] / "check.json"
@@ -594,6 +638,8 @@ rule report:
 
 
 rule bowtie2:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         rules.combine.output.fasta,
     output:
@@ -612,6 +658,8 @@ rule bowtie2:
 
 
 rule minimap2_index:
+    conda:
+        "envs/boardercollie.yaml"
     input:
         rules.combine.output.fasta,
     output:
@@ -622,3 +670,29 @@ rule minimap2_index:
     shell:
         logged("minimap2_index",
         "minimap2 -x map-ont -I 16G -t {threads} -d {output} {input} 2> {output}.log")
+
+
+# Hosts with reference_out: the joined host reference also goes to that fixed path
+# (a hard link, or a copy when the path is on another file system), with its
+# members.tsv beside it, so a calling workflow (MAGmaker's host_filter genome) can
+# name the file before the run. One step per host, since each path is given in full.
+for _h in CFG.hosts:
+    if not _h.reference_out:
+        continue
+
+    rule:
+        name:
+            "reference_out_" + re.sub(r"[^A-Za-z0-9_]", "_", _h.name)
+        input:
+            fasta=LIB / "hosts" / _h.name / host_key(_h) / f"{_h.name}.fna",
+            members=LIB / "hosts" / _h.name / host_key(_h) / "members.tsv",
+            report=LIB / "hosts" / _h.name / host_key(_h) / "contamination_report.tsv",
+        output:
+            fasta=_h.reference_out,
+            members=_h.reference_out + ".members.tsv",
+        conda:
+            "envs/boardercollie.yaml"
+        shell:
+            logged("reference_out",
+            "ln -f {input.fasta} {output.fasta} 2>/dev/null || cp {input.fasta} {output.fasta}\n"
+            "cp {input.members} {output.members}")

@@ -103,6 +103,10 @@ class HostSpec:
     genomes: list[GenomeSpec]
     ladder: list[str]
     indexes: list[str] = field(default_factory=lambda: list(INDEX_TYPES))
+    # A fixed path the joined host reference is also written to (hard link, or copy
+    # across file systems), for a workflow that needs the path before the run, such
+    # as MAGmaker's host_filter genome.
+    reference_out: str | None = None
 
 
 @dataclass
@@ -210,7 +214,7 @@ def parse_config(data: dict[str, Any]) -> Config:
         raise ConfigError(f"unknown top-level keys: {sorted(unknown)}")
     if not isinstance(data["hosts"], list) or not data["hosts"]:
         raise ConfigError("hosts must be a non-empty list")
-    hosts, names = [], set()
+    hosts, names, outs = [], set(), set()
     for h in data["hosts"]:
         name = h.get("name") if isinstance(h, dict) else None
         if not name:
@@ -241,7 +245,17 @@ def parse_config(data: dict[str, Any]) -> Config:
                 raise ConfigError(f"host {name}: genome {g.key}: the relative must differ from the genome and the ladder")
         if set(ladder) & set(keys):
             raise ConfigError(f"host {name}: a ladder reference is also one of the host's genomes")
-        hosts.append(HostSpec(name=name, genomes=genomes, ladder=list(ladder), indexes=list(indexes)))
+        unknown = set(h) - {"name", "genomes", "ladder", "indexes", "reference_out"}
+        if unknown:
+            raise ConfigError(f"host {name}: unknown keys {sorted(unknown)}")
+        out = h.get("reference_out")
+        if out is not None and (not isinstance(out, str) or not out.strip()):
+            raise ConfigError(f"host {name}: reference_out must be a file path")
+        if out and out in outs:
+            raise ConfigError(f"host {name}: reference_out {out} is also another host's")
+        outs.add(out)
+        hosts.append(HostSpec(name=name, genomes=genomes, ladder=list(ladder), indexes=list(indexes),
+                              reference_out=out or None))
     return Config(
         library_dir=Path(data["library_dir"]),
         index_dir=Path(data["index_dir"]),
