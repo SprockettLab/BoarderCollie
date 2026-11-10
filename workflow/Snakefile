@@ -5,6 +5,8 @@
 # Per genome: fetch, FCS-GX screen, cut flagged regions and draw controls,
 # align them to the relative and the reference ladder, tandem repeats and
 # copies, decide (boardercollie.rules), clean with gx clean-genome, check.
+# settings: download_only skips everything after fetch; with the alignment
+# checks (rules 3 to 5) all off, the alignment and repeat steps are skipped.
 # Per host: join the cleaned genomes, build bowtie2 and minimap2 indexes.
 # Every reference genome (relatives and ladder) is fetched and screened too,
 # and is used only as a copy without every sequence FCS-GX reported in it.
@@ -23,10 +25,24 @@ from boardercollie.references import resolve
 
 CFG = parse_config(config)
 LIB, IDX, WORK = CFG.library_dir, CFG.index_dir, CFG.work_dir
-# Relatives and comparison genomes left blank in the config are chosen from the
-# NCBI taxonomy now, saved in the library with every candidate, and reused later.
-for _line in resolve(CFG, LIB):
-    print("BoarderCollie reference choice:", _line, file=sys.stderr)
+CHECKS = CFG.settings["checks"]
+# download_only: genomes are fetched and joined as they are; nothing is screened or cleaned.
+DOWNLOAD_ONLY = CFG.settings["download_only"]
+# The alignment steps (and the relatives and ladder they align to) are needed only
+# when at least one alignment-based check (rules 3 to 5) is on.
+ALIGN = CHECKS["related_genome"] or CHECKS["lineage_repeat"] or CHECKS["repeat_family"]
+if ALIGN:
+    # Relatives and comparison genomes left blank in the config are chosen from the
+    # NCBI taxonomy now, saved in the library with every candidate, and reused later.
+    for _line in resolve(CFG, LIB):
+        print("BoarderCollie reference choice:", _line, file=sys.stderr)
+else:
+    for _h in CFG.hosts:
+        _h.ladder = []
+        for _g in _h.genomes:
+            _g.relative = None
+print("BoarderCollie checks:", "download only" if DOWNLOAD_ONLY else
+      ", ".join(f"{k} {'on' if v else 'off'}" for k, v in CHECKS.items()), file=sys.stderr)
 SETTINGS_HASH = settings_hash(CFG.settings)
 RES = Path(workflow.basedir).parent / "resources"
 # The config as used, saved once per run key set; every step reads this copy.
@@ -37,6 +53,8 @@ CONFIGFILE.write_text(yaml.safe_dump(config, sort_keys=True))
 
 def db_build():
     """FCS-GX database build date: from the config if given, else from the database's all.meta.jsonl."""
+    if DOWNLOAD_ONLY:
+        return "not_screened"
     if CFG.fcs_gx_db_build:
         return CFG.fcs_gx_db_build
     meta = CFG.fcs_gx_db / "all.meta.jsonl"
@@ -74,6 +92,13 @@ def G(acc):
 
 def RUN(acc):
     return G(acc) / "runs" / run_key(acc)
+
+
+def member_files(acc):
+    """The genome a host reference is built from, and its record: the cleaned genome, or the download."""
+    if DOWNLOAD_ONLY:
+        return G(acc) / "original" / f"{acc}.fna", G(acc) / "original" / "record.json"
+    return RUN(acc) / f"{acc}_clean.fna", RUN(acc) / "run.json"
 
 
 def W(acc):
@@ -275,17 +300,21 @@ def decide_inputs(w):
     refs = [r for r in [g["spec"].relative, *g["host"].ladder] if r]
     lineage = lineage_candidates(acc)
     distant = {"distant": d / "copies" / f"{g['host'].ladder[-1]}.paf"} if g["host"].ladder else {}
-    return {**distant,
+    common = {
         "segments": d / "segments.tsv",
         "fasta": d / "segments.fna",
         "composition": d / "composition.tsv",
         "foreign": WORK / "foreign_controls.fna",
+        "record": G(acc) / "original" / "record.json",
+    }
+    if not ALIGN:
+        return common
+    return {**distant, **common,
         "align": [d / "align" / f"{r}.paf" for r in refs],
         "trf": d / "trf.ngs",
         "own": d / "copies" / "own.paf",
         "lineage": [d / "copies" / f"{r}.paf" for r in lineage],
         "lineage_records": [G(r) / "original" / "record.json" for r in lineage],
-        "record": G(acc) / "original" / "record.json",
     }
 
 
@@ -293,7 +322,10 @@ def decide_args(w):
     g = GENOMES[w.acc]
     d = W(w.acc)
     rel, ladder = g["spec"].relative, g["host"].ladder
-    al = [f"--alignment {rel}:relative:{d / 'align' / (rel + '.paf')}"] if rel else []
+    if not ALIGN:
+        return ""
+    al = [f"--trf {d / 'trf.ngs'} --own-copies {d / 'copies' / 'own.paf'}"]
+    al += [f"--alignment {rel}:relative:{d / 'align' / (rel + '.paf')}"] if rel else []
     al += [f"--alignment {r}:ladder:{d / 'align' / (r + '.paf')}" for r in ladder]
     if ladder:
         al.append(f"--distant-copies {d / 'copies' / (ladder[-1] + '.paf')}")
@@ -318,7 +350,7 @@ rule decide:
     shell:
         "python -m boardercollie.cli decide --config {CONFIGFILE} --accession {wildcards.acc} "
         "--segments {input.segments} --segments-fasta {input.fasta} --composition {input.composition} "
-        "--foreign {input.foreign} --trf {input.trf} --own-copies {input.own} --own-record {input.record} "
+        "--foreign {input.foreign} --own-record {input.record} "
         "--taxonomy-cache {output.taxonomy} --out-decisions {output.decisions} "
         "--out-removals {output.removals} --out-lineage {output.lineage} --settings-hash {SETTINGS_HASH} {params.args}"
 
@@ -360,8 +392,8 @@ rule clean:
 
 rule combine:
     input:
-        clean=lambda w: [RUN(g.key) / f"{g.key}_clean.fna" for g in HOSTS[w.host].genomes],
-        records=lambda w: [RUN(g.key) / "run.json" for g in HOSTS[w.host].genomes],
+        clean=lambda w: [member_files(g.key)[0] for g in HOSTS[w.host].genomes],
+        records=lambda w: [member_files(g.key)[1] for g in HOSTS[w.host].genomes],
     output:
         fasta=LIB / "hosts" / "{host}" / "{hkey}" / "{host}.fna",
         members=LIB / "hosts" / "{host}" / "{hkey}" / "members.tsv",

@@ -85,6 +85,8 @@ def lineage_members(own_record: Path, candidates: list[str], rank: str, fetch=No
     """Of candidate "accession=record=paf" entries, the PAFs of assemblies in the same taxon at rank."""
     if fetch is None:
         from .ncbi import taxonomy as fetch
+    if not candidates:
+        return []
     own = json.loads(own_record.read_text())["tax_id"]
     entries = [c.split("=", 2) for c in candidates]
     taxids = {acc: json.loads(Path(rec).read_text())["tax_id"] for acc, rec, _ in entries}
@@ -103,7 +105,8 @@ def cmd_decide(a):
     lineage = lineage_members(Path(a.own_record), a.lineage_copies, cfg.settings["repeat_lineage_rank"])
     Path(a.out_lineage).write_text("".join(f"{acc}\t{p}\n" for acc, p in lineage))
     res = decide_from_files(a.accession, Path(a.segments), Path(a.segments_fasta), Path(a.composition),
-                            Path(a.foreign), pafs, Path(a.trf), Path(a.own_copies),
+                            Path(a.foreign), pafs, Path(a.trf) if a.trf else None,
+                            Path(a.own_copies) if a.own_copies else None,
                             [p for _, p in lineage], Path(a.distant_copies) if a.distant_copies else None,
                             cfg.settings, Path(a.taxonomy_cache), Path(a.out_decisions), Path(a.out_removals),
                             a.settings_hash, test_unavailable=a.test_unavailable)
@@ -166,10 +169,12 @@ def main(argv=None):
         s.add_argument(f"--{k}", required=True)
 
     s = sub.add_parser("decide"); s.set_defaults(f=cmd_decide)
-    for k in ("config", "accession", "segments", "segments-fasta", "composition", "foreign", "trf",
-              "own-copies", "own-record", "taxonomy-cache", "out-decisions", "out-removals",
+    for k in ("config", "accession", "segments", "segments-fasta", "composition", "foreign",
+              "own-record", "taxonomy-cache", "out-decisions", "out-removals",
               "out-lineage", "settings-hash"):
         s.add_argument(f"--{k}", required=True)
+    s.add_argument("--trf", default=None, help="TRF output; absent when the alignment checks are off")
+    s.add_argument("--own-copies", default=None, help="copies in the genome itself; absent when the alignment checks are off")
     s.add_argument("--distant-copies", default=None, help="copies in the most distant comparison genome; absent when there is none")
     s.add_argument("--test-unavailable", choices=("no_relative", "no_ladder"), default=None,
                    help="why the relative-genome alignment test cannot run; FCS-GX's own actions are applied")

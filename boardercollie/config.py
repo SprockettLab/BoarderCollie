@@ -19,6 +19,18 @@ import yaml
 from .references import is_automatic
 
 DEFAULT_SETTINGS: dict[str, Any] = {
+    # Download the genomes and join them as they are: no screening, no checks, no cleaning.
+    "download_only": False,
+    # Each check can be turned off. A region a check would have kept goes on to the
+    # remaining checks and is removed unless one of them keeps it. fcs_gx off is the
+    # same as download_only.
+    "checks": {
+        "fcs_gx": True,           # screen with FCS-GX (off: nothing flagged, nothing cleaned)
+        "retrovirus": True,       # rule 2
+        "related_genome": True,   # rule 3
+        "lineage_repeat": True,   # rule 4
+        "repeat_family": True,    # rule 5
+    },
     # Rule 2: FCS-GX hits whose best-match tax-id falls in these NCBI taxa are
     # kept untested. 11632 = Retroviridae (endogenous retroviruses).
     "keep_taxa": [11632],
@@ -98,7 +110,7 @@ class Config:
     library_dir: Path
     index_dir: Path
     work_dir: Path
-    fcs_gx_db: Path
+    fcs_gx_db: Path | None
     hosts: list[HostSpec]
     settings: dict[str, Any]
     fcs_gx_db_build: str | None = None
@@ -119,7 +131,20 @@ def merge_settings(overrides: dict[str, Any] | None) -> dict[str, Any]:
     for key, value in (overrides or {}).items():
         if key not in DEFAULT_SETTINGS:
             raise ConfigError(f"unknown setting: {key}")
-        settings[key] = value
+        if key == "checks":
+            if not isinstance(value, dict):
+                raise ConfigError("checks must map check names to true or false")
+            unknown = set(value) - set(DEFAULT_SETTINGS["checks"])
+            if unknown:
+                raise ConfigError(f"unknown checks: {sorted(unknown)}; known: {sorted(DEFAULT_SETTINGS['checks'])}")
+            settings["checks"].update(value)
+        else:
+            settings[key] = value
+    if not isinstance(settings["download_only"], bool) or not all(isinstance(v, bool) for v in settings["checks"].values()):
+        raise ConfigError("download_only and every check must be true or false")
+    if settings["download_only"] or not settings["checks"]["fcs_gx"]:
+        settings["download_only"] = True
+        settings["checks"] = {k: False for k in settings["checks"]}
     for key in FRACTION_SETTINGS:
         v = settings[key]
         if not isinstance(v, (int, float)) or not 0 <= v <= 1:
@@ -168,7 +193,8 @@ def _genome(entry: Any, host: str) -> GenomeSpec:
 
 
 def parse_config(data: dict[str, Any]) -> Config:
-    for key in ("library_dir", "index_dir", "work_dir", "fcs_gx_db", "hosts"):
+    settings = merge_settings(data.get("settings"))
+    for key in ("library_dir", "index_dir", "work_dir", "hosts") + (() if settings["download_only"] else ("fcs_gx_db",)):
         if key not in data:
             raise ConfigError(f"missing required key: {key}")
     unknown = set(data) - {"library_dir", "index_dir", "work_dir", "fcs_gx_db", "fcs_gx_db_build", "hosts", "settings"}
@@ -212,9 +238,9 @@ def parse_config(data: dict[str, Any]) -> Config:
         library_dir=Path(data["library_dir"]),
         index_dir=Path(data["index_dir"]),
         work_dir=Path(data["work_dir"]),
-        fcs_gx_db=Path(data["fcs_gx_db"]),
+        fcs_gx_db=Path(data["fcs_gx_db"]) if data.get("fcs_gx_db") else None,
         hosts=hosts,
-        settings=merge_settings(data.get("settings")),
+        settings=settings,
         fcs_gx_db_build=str(data["fcs_gx_db_build"]) if data.get("fcs_gx_db_build") else None,
     )
 

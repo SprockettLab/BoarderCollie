@@ -91,3 +91,25 @@ def test_ladder_settings_checked():
 def test_relative_must_differ():
     with pytest.raises(ConfigError):
         parse_config(minimal(hosts=[{"name": "x", "ladder": ["R.1"], "genomes": [{"accession": "A.1", "relative": "R.1"}]}]))
+
+
+def test_checks_switches():
+    c = parse_config(minimal(settings={"checks": {"retrovirus": False}}))
+    assert c.settings["checks"]["retrovirus"] is False and c.settings["checks"]["related_genome"] is True
+    with pytest.raises(ConfigError):
+        parse_config(minimal(settings={"checks": {"retrovirus": "no"}}))
+    with pytest.raises(ConfigError):
+        parse_config(minimal(settings={"checks": {"blast": True}}))
+
+
+def test_download_only_turns_everything_off_and_needs_no_database():
+    d = minimal(settings={"download_only": True})
+    del d["fcs_gx_db"]
+    c = parse_config(d)
+    assert c.settings["download_only"] and not any(c.settings["checks"].values()) and c.fcs_gx_db is None
+    c = parse_config(minimal(settings={"checks": {"fcs_gx": False}}))
+    assert c.settings["download_only"] and not any(c.settings["checks"].values())
+    d = minimal()
+    del d["fcs_gx_db"]
+    with pytest.raises(ConfigError):
+        parse_config(d)

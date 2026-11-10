@@ -46,8 +46,8 @@ def decide_from_files(
     composition_tsv: Path,
     foreign_fasta: Path,
     alignment_pafs: list[tuple[str, str, Path]],
-    trf_ngs: Path,
-    own_copies_paf: Path,
+    trf_ngs: Path | None,
+    own_copies_paf: Path | None,
     lineage_copies_pafs: list[Path],
     distant_copies_paf: Path | None,
     settings: dict,
@@ -77,10 +77,10 @@ def decide_from_files(
         return out
 
     flagged_len = {s["id"]: int(s["length"]) for s in flagged}
-    trf = read_trf_ngs(trf_ngs, flagged_len) if flagged else {}
+    trf = read_trf_ngs(trf_ngs, flagged_len) if flagged and trf_ngs else {}
     own_pos = {s["id"]: (s["seq_id"], int(s["start"]), int(s["end"])) for s in flagged}
     cover = settings["repeat_copy_min_cover"]
-    own = count_copies(read_paf(own_copies_paf), cover, own_pos)
+    own = count_copies(read_paf(own_copies_paf), cover, own_pos) if own_copies_paf else {}  # noqa: F841 (not reported yet)
     lineage = {}
     for p in lineage_copies_pafs:
         for q, n in count_copies(read_paf(p), cover).items():
@@ -91,13 +91,13 @@ def decide_from_files(
     regions = []
     for s in flagged:
         q = s["id"]
-        t = trf[q]
+        t = trf.get(q)
         c = comp.get(q)
         taxid = int(s["fcs_top_taxid"]) if s["fcs_top_taxid"] not in ("", "NA") else None
         regions.append(Region(
             q, accession, s["seq_id"], int(s["start"]), int(s["end"]), s["fcs_action"], s["fcs_div"],
             s["fcs_top_tax"], taxid, s["source"], alignments(q),
-            RepeatEvidence(t.cover, t.main_cover, t.main_unit, lineage.get(q, 0), distant.get(q, 0)),
+            RepeatEvidence(t.cover, t.main_cover, t.main_unit, lineage.get(q, 0), distant.get(q, 0)) if t else None,
             CompositionEvidence(float(c["cpg_oe"]), float(c["cpg_oe_low"]), float(c["cpg_oe_high"])) if c else None,
         ))
     # Host control ids are <region id>_C<n> (extract.py).
