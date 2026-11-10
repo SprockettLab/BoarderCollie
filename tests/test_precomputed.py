@@ -16,9 +16,16 @@ from boardercollie.precomputed import build_date, check_reports, find_reports, h
 
 from test_fcs_report import TAX_HEADER, tax_row
 
-HEAD = '##[["FCS genome report", 2, 1], {"run-info": {"tax-id": 9541}, "db": {"build-date": "2023-01-24"}}]\n'
+# Header details as FCS-GX 0.5.5 writes them (from a report on demon, 2026-11-06).
+META = ('{"git-rev": "v0.5.5-9-gfc836c1", "run-date": "Fri Nov  6 12:32:20 2026", '
+        '"db": {"build-date": "2023-01-24", "seqs": 3025824, "Gbp": 709.264}, '
+        '"run-info": {"agg-cvg": 0.980024, "asserted-div": "anml:primates", '
+        '"inferred-primary-divs": ["anml:primates", "anml:mammals", "anml:rodents"], '
+        '"corrected-primary-divs": ["anml:primates", "anml:mammals", "anml:rodents"], '
+        '"genome-hash": "608bfb626fac23ae"}}')
+HEAD = '##[["FCS genome report", 2, 1], ' + META + ']\n'
 COLS = "#seq_id\tstart_pos\tend_pos\tseq_len\taction\tdiv\tagg_cont_cov\ttop_tax_name\n"
-TAX_HEAD = '##[["GX taxonomy analysis report", 3, 1], {"db": {"build-date": "2023-01-24"}}]\n'
+TAX_HEAD = '##[["GX taxonomy analysis report", 3, 1], ' + META + ']\n'
 
 
 def genome(tmp_path, name="G.1"):
@@ -68,9 +75,10 @@ def test_find_half_a_pair_or_two_pairs_is_an_error(tmp_path):
 
 # Header details.
 
-def test_header_build_and_taxid(tmp_path):
+def test_header_fields(tmp_path):
     a, t = reports(tmp_path / "r")
-    assert header_info(a) == {"tax-id": 9541, "build-date": "2023-01-24"}
+    assert header_info(a) == {"git-rev": "v0.5.5-9-gfc836c1", "build-date": "2023-01-24",
+                              "asserted-div": "anml:primates", "genome-hash": "608bfb626fac23ae"}
     assert build_date(a, t) == "2023-01-24"
     a.write_text(a.read_text().replace("2023-01-24", "2024-05-01"))
     with pytest.raises(ReportError, match="different database builds"):
@@ -96,7 +104,8 @@ def test_matching_reports_pass(tmp_path):
     a, t = reports(tmp_path / "r")
     rec = check_reports(a, t, genome(tmp_path), 9541)
     assert (rec["action_rows"], rec["taxonomy_rows"], rec["regions_to_test"], rec["genome_sequences"]) == (1, 3, 1, 2)
-    assert rec["database_build"] == "2023-01-24" and rec["tax_id_in_reports"] == [9541]
+    assert rec["database_build"] == "2023-01-24" and rec["asserted_division"] == "anml:primates"
+    assert rec["fcs_gx_genome_hash"] == "608bfb626fac23ae" and rec["fcs_gx_version"] == "v0.5.5-9-gfc836c1"
 
 
 def test_sequence_missing_from_genome(tmp_path):
@@ -117,12 +126,17 @@ def test_length_differs(tmp_path):
         check_reports(a, t, genome(tmp_path), 9541)
 
 
-def test_taxid_differs_or_not_stated(tmp_path):
+def test_reports_from_two_runs(tmp_path):
     a, t = reports(tmp_path / "r")
-    with pytest.raises(ReportError, match="tax-id"):
-        check_reports(a, t, genome(tmp_path), 9606)
-    a, t = reports(tmp_path / "s", head='##[["FCS genome report", 2, 1], {}]\n')
-    assert check_reports(a, t, genome(tmp_path), 9606)["tax_id_in_reports"] == "not stated"
+    t.write_text(t.read_text().replace("608bfb626fac23ae", "0000000000000000"))
+    with pytest.raises(ReportError, match="different FCS-GX runs"):
+        check_reports(a, t, genome(tmp_path), 9541)
+
+
+def test_headers_without_details_still_checked_by_sequence(tmp_path):
+    a, t = reports(tmp_path / "s", head='##[["FCS genome report", 2, 1], {}]\n', tax_head="")
+    rec = check_reports(a, t, genome(tmp_path), 9606)
+    assert rec["asserted_division"] == "not stated" and rec["tax_id_checked"].startswith("no")
 
 
 def test_empty_reports_pass(tmp_path):
