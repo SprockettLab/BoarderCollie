@@ -147,6 +147,16 @@ def cmd_combine(a):
             mem.write(f"{acc}\t{fasta}\t{md5(Path(fasta))}\t{record}\n")
 
 
+def cmd_report(a):
+    from .report import write_host_report
+    genomes = []
+    for spec in a.genome:  # accession|decisions|run|record|relative|ladder (comma-separated); "-" for none
+        acc, dec, run, rec, rel, lad = spec.split("|")
+        genomes.append({"accession": acc, "decisions": None if dec == "-" else dec, "run": run, "record": rec,
+                        "relative": None if rel == "-" else rel, "ladder": [] if lad == "-" else lad.split(",")})
+    write_host_report(a.host, genomes, Path(a.out_regions), Path(a.out_genomes))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="boardercollie")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -194,6 +204,11 @@ def main(argv=None):
     s.add_argument("--accessions", nargs="+", required=True); s.add_argument("--fastas", nargs="+", required=True)
     s.add_argument("--records", nargs="+", required=True)
     s.add_argument("--out", required=True); s.add_argument("--members-out", required=True)
+
+    s = sub.add_parser("report"); s.set_defaults(f=cmd_report)
+    s.add_argument("--host", required=True)
+    s.add_argument("--genome", action="append", required=True, help="accession|decisions|run|record|relative|ladder")
+    s.add_argument("--out-regions", required=True); s.add_argument("--out-genomes", required=True)
 
     a = p.parse_args(argv)
     a.f(a)
