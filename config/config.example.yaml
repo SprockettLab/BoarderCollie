@@ -10,6 +10,12 @@ fcs_gx_db: /path/to/fcs_gx/gxdb   # ideally a fast local copy for the run: scrip
 # Optional: the database build date, if the database folder has no all.meta.jsonl.
 # fcs_gx_db_build: "2023-01-24"
 
+# Optional: a folder of FCS-GX reports made earlier, used instead of running FCS-GX.
+# Per genome: <accession>.fcs_gx_report.txt and <accession>.taxonomy.rpt
+# (or <accession>.<tax-id>.fcs_gx_report.txt and .taxonomy.rpt, as FCS-GX names them).
+# Genomes without reports here are screened, which needs fcs_gx_db.
+# fcs_gx_reports: /path/to/fcs_gx_reports
+
 # Each host: a name, its genomes, and the reference ladder (comparison genomes).
 # The cleaned genomes of a host are joined into one reference named after the host.
 # Each genome is an NCBI assembly accession or a local FASTA with its NCBI tax-id.

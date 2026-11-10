@@ -31,8 +31,22 @@ REGION_COLUMNS = (
 GENOME_COLUMNS = (
     "host", "accession", "organism", "status", "relative_alignment_test", "host_controls",
     "regions_flagged", "regions_kept", "regions_removed", "removed_bp", "original_bp", "reference_bp",
-    "original_md5", "reference_md5", "relative", "ladder", "run_key",
+    "original_md5", "reference_md5", "relative", "ladder", "run_key", "fcs_gx",
 )
+
+
+def _screen_source(screen: str | None) -> str:
+    """Where a genome's FCS-GX results came from, in words.
+
+    screen: "run:<database build>", "precomputed:<check.json>", or "-"/None (not screened)."""
+    if not screen or screen == "-":
+        return "not screened"
+    kind, _, value = screen.partition(":")
+    if kind == "run":
+        return f"FCS-GX run by BoarderCollie (database build {value})"
+    check = json.loads(Path(value).read_text())
+    return (f"reports made earlier: {check['action_report']} and {check['taxonomy_report']} "
+            f"(database build {check['database_build'] or 'not stated'}; checked against the genome)")
 
 
 def _organism(record: dict) -> str:
@@ -52,7 +66,7 @@ def _header(path: Path) -> dict[str, str]:
 
 def write_host_report(host: str, genomes: list[dict], regions_out: Path, genomes_out: Path) -> None:
     """genomes: dicts with accession, decisions (path or None), run (run.json path), record
-    (download record path), relative, ladder (list)."""
+    (download record path), relative, ladder (list), and screen (see _screen_source)."""
     with open(regions_out, "w", newline="") as rf, open(genomes_out, "w", newline="") as gf:
         rw = csv.writer(rf, delimiter="\t", lineterminator="\n")
         gw = csv.writer(gf, delimiter="\t", lineterminator="\n")
@@ -65,7 +79,7 @@ def write_host_report(host: str, genomes: list[dict], regions_out: Path, genomes
             if not g.get("decisions"):
                 gw.writerow([host, g["accession"], organism, "not screened (download_only)", "not applied",
                              "NA", "NA", "NA", "NA", 0, "NA", "NA", record.get("md5", "NA"), record.get("md5", "NA"),
-                             "", "", ""])
+                             "", "", "", _screen_source(g.get("screen"))])
                 continue
             head = _header(Path(g["decisions"]))
             rows = list(csv.DictReader((l for l in open(g["decisions"]) if not l.startswith("#")), delimiter="\t"))
@@ -81,4 +95,5 @@ def write_host_report(host: str, genomes: list[dict], regions_out: Path, genomes
                          len(rows), sum(r["action"] == "keep" for r in rows), sum(r["action"] == "remove" for r in rows),
                          run.get("removed_bp", "NA"), run.get("original_bp", "NA"), run.get("clean_bp", "NA"),
                          run.get("original_md5", "NA"), run.get("clean_md5", "NA"),
-                         g.get("relative") or "", ",".join(g.get("ladder") or []), run.get("run_key", "")])
+                         g.get("relative") or "", ",".join(g.get("ladder") or []), run.get("run_key", ""),
+                         _screen_source(g.get("screen"))])

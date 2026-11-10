@@ -41,10 +41,19 @@ mamba env create -f workflow/envs/boardercollie.yaml -p ./env
 FCS-GX needs its database (about 520 GB) in memory, so screening runs one genome at a time on a large-memory node.
 It is much faster when the database is on local storage: copy it once per run with `scripts/stage_fcs_gx_db.sh` and pass the copy with `--config fcs_gx_db=<copy>`, deleting the copy afterwards.
 
+FCS-GX reports made earlier can be used instead of running FCS-GX.
+Put them in one folder and name it in the config as `fcs_gx_reports`.
+Each genome (and each relative or comparison genome) needs both its reports, named after its accession or FASTA file name: `<accession>.fcs_gx_report.txt` and `<accession>.taxonomy.rpt`, or as FCS-GX names them, `<accession>.<tax-id>.fcs_gx_report.txt` and `<accession>.<tax-id>.taxonomy.rpt`.
+Before they are used, every sequence the reports name must be in the genome with the same length, and the tax-id in the report header (when given) must be the genome's; otherwise the run stops.
+Genomes without reports in the folder are screened as usual, which needs `fcs_gx_db`.
+All reports must come from one database build: the build is read from the report headers, or given as `fcs_gx_db_build`.
+Results made with these reports get their own run key, and `genome_summary.tsv` says where each genome's FCS-GX results came from.
+
 Outputs, under `library_dir`:
 
 - `genomes/<accession>/original/`: the genome as downloaded and its NCBI record (md5 checked against NCBI).
 - `genomes/<accession>/fcs_gx/<database build>/`: FCS-GX reports.
+- `genomes/<accession>/fcs_gx/precomputed/<reports hash>/`: copies of reports made earlier, and `check.json` (what was checked against the genome).
 - `genomes/<accession>/runs/<run key>/`: `decisions.tsv`, the cleaned and removed sequence, the applied FCS-GX report and `run.json`.
 - `hosts/<name>/<host key>/`: the joined host reference and `members.tsv`.
 

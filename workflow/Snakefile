@@ -25,6 +25,7 @@ import yaml
 
 from boardercollie import __version__
 from boardercollie.config import parse_config, settings_hash
+from boardercollie.precomputed import build_date, find_reports, reports_hash
 from boardercollie.references import resolve
 
 CFG = parse_config(config)
@@ -104,6 +105,7 @@ onstart:
         "boardercollie": __version__, "configfile": [str(f) for f in workflow.configfiles],
         "settings_hash": SETTINGS_HASH, "download_only": CFG.settings["download_only"],
         "checks": CFG.settings["checks"], "fcs_gx_db": str(CFG.fcs_gx_db), "fcs_gx_build": GX,
+        "fcs_gx_reports_made_earlier": {a: [str(p) for p in pair] for a, pair in PRECOMPUTED.items()},
         "hosts": {h.name: {"genomes": [g.key for g in h.genomes],
                            "relatives": {g.key: g.relative for g in h.genomes}, "ladder": h.ladder}
                   for h in CFG.hosts}}, sort_keys=True))
@@ -124,21 +126,6 @@ CONFIGFILE.parent.mkdir(parents=True, exist_ok=True)
 CONFIGFILE.write_text(yaml.safe_dump(config, sort_keys=True))
 
 
-def db_build():
-    """FCS-GX database build date: from the config if given, else from the database's all.meta.jsonl."""
-    if DOWNLOAD_ONLY:
-        return "not_screened"
-    if CFG.fcs_gx_db_build:
-        return CFG.fcs_gx_db_build
-    meta = CFG.fcs_gx_db / "all.meta.jsonl"
-    m = re.search(r'"build-date"\s*:\s*"([0-9-]+)"', meta.read_text()) if meta.exists() else None
-    if not m:
-        raise ValueError(f"cannot read the FCS-GX database build date from {meta}")
-    return m.group(1)
-
-
-GX = db_build()
-
 # Genomes to clean, with their host settings; every accession to fetch and screen.
 GENOMES = {}
 for h in CFG.hosts:
@@ -147,12 +134,73 @@ for h in CFG.hosts:
 REFERENCES = sorted(({g["spec"].relative for g in GENOMES.values()} - {None}) | {a for h in CFG.hosts for a in h.ladder})
 ALL = sorted(set(GENOMES) | set(REFERENCES))
 
+# FCS-GX reports made earlier (fcs_gx_reports): genomes with a report pair there are
+# not screened; the pair is checked against the genome and copied into the library.
+PRECOMPUTED = {}
+if not DOWNLOAD_ONLY and CFG.fcs_gx_reports:
+    if not CFG.fcs_gx_reports.is_dir():
+        raise ValueError(f"fcs_gx_reports: {CFG.fcs_gx_reports} is not a folder")
+    for _acc in ALL:
+        _pair = find_reports(CFG.fcs_gx_reports, _acc)
+        if _pair:
+            PRECOMPUTED[_acc] = _pair
+PHASH = {acc: reports_hash(*pair) for acc, pair in PRECOMPUTED.items()}
+TO_SCREEN = [] if DOWNLOAD_ONLY else [a for a in ALL if a not in PRECOMPUTED]
+if TO_SCREEN and not CFG.fcs_gx_db:
+    raise ValueError(f"no FCS-GX database (fcs_gx_db) is given and {CFG.fcs_gx_reports} has no reports for: "
+                     + ", ".join(TO_SCREEN))
+
+
+def db_build():
+    """FCS-GX database build date: from the config if given, else from the database's
+    all.meta.jsonl, else from the headers of the reports made earlier. Every report made
+    earlier must name the same build, when its header names one."""
+    if DOWNLOAD_ONLY:
+        return "not_screened"
+    stated = {acc: build_date(*pair) for acc, pair in PRECOMPUTED.items()}
+    builds = set(stated.values()) - {None}
+    if CFG.fcs_gx_db_build:
+        gx = CFG.fcs_gx_db_build
+    elif TO_SCREEN:
+        meta = CFG.fcs_gx_db / "all.meta.jsonl"
+        m = re.search(r'"build-date"\s*:\s*"([0-9-]+)"', meta.read_text()) if meta.exists() else None
+        if not m:
+            raise ValueError(f"cannot read the FCS-GX database build date from {meta}")
+        gx = m.group(1)
+    elif len(builds) == 1:
+        gx = builds.pop()
+        builds = {gx}
+    else:
+        raise ValueError("the FCS-GX reports made earlier do not state one database build "
+                         f"({sorted(builds) or 'none stated'}); give it as fcs_gx_db_build")
+    other = {acc: b for acc, b in stated.items() if b is not None and b != gx}
+    if other:
+        raise ValueError(f"FCS-GX reports made with a different database build than {gx}: {other}")
+    return gx
+
+
+GX = db_build()
+if PRECOMPUTED:
+    print(f"BoarderCollie: FCS-GX reports made earlier are used for {len(PRECOMPUTED)} of {len(ALL)} genomes:",
+          ", ".join(sorted(PRECOMPUTED)), file=sys.stderr)
+
+
+def screen_files(acc):
+    """The FCS-GX action and taxonomy reports a genome is tested with."""
+    d = G(acc) / "fcs_gx" / ("precomputed/" + PHASH[acc] if acc in PRECOMPUTED else GX)
+    return {"report": d / "fcs_gx_report.txt", "taxonomy": d / "taxonomy.rpt"}
+
 
 def run_key(acc):
     g = GENOMES[acc]
-    text = json.dumps({"version": __version__, "gx": GX, "settings": SETTINGS_HASH,
-                       "relative": g["spec"].relative, "ladder": g["host"].ladder}, sort_keys=True)
-    return hashlib.sha256(text.encode()).hexdigest()[:12]
+    key = {"version": __version__, "gx": GX, "settings": SETTINGS_HASH,
+           "relative": g["spec"].relative, "ladder": g["host"].ladder}
+    # Reports made earlier (for the genome or its references) are part of the key, so
+    # results from them never mix with results from FCS-GX run here.
+    used = {a: PHASH[a] for a in [acc, g["spec"].relative, *g["host"].ladder] if a in PRECOMPUTED}
+    if used:
+        key["precomputed_reports"] = used
+    return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:12]
 
 
 def host_key(h):
@@ -198,6 +246,7 @@ wildcard_constraints:
     acc="[^/]+",
     ref=r"GC[AF]_[0-9]+\.[0-9]+",
     host="[^/]+",
+    phash="[0-9a-f]{12}",
 
 
 rule all:
@@ -249,11 +298,30 @@ rule screen:
         """)
 
 
+rule screen_precomputed:
+    input:
+        fasta=rules.fetch.output.fasta,
+        record=rules.fetch.output.record,
+        action=lambda w: PRECOMPUTED[w.acc][0],
+        taxonomy=lambda w: PRECOMPUTED[w.acc][1],
+    output:
+        report=LIB / "genomes" / "{acc}" / "fcs_gx" / "precomputed" / "{phash}" / "fcs_gx_report.txt",
+        taxonomy=LIB / "genomes" / "{acc}" / "fcs_gx" / "precomputed" / "{phash}" / "taxonomy.rpt",
+        record=LIB / "genomes" / "{acc}" / "fcs_gx" / "precomputed" / "{phash}" / "check.json",
+    resources:
+        mem_mb=8000,
+    shell:
+        logged("screen_precomputed",
+        "python -m boardercollie.cli import-fcs-reports --fasta {input.fasta} --record {input.record} "
+        "--action {input.action} --taxonomy {input.taxonomy} --build {GX} "
+        "--out-report {output.report} --out-taxonomy {output.taxonomy} --out-record {output.record}")
+
+
 rule reference_without_flagged:
     input:
         fasta=rules.fetch.output.fasta,
-        report=rules.screen.output.report,
-        taxonomy=rules.screen.output.taxonomy,
+        report=lambda w: screen_files(w.acc)["report"],
+        taxonomy=lambda w: screen_files(w.acc)["taxonomy"],
     output:
         fasta=temp(WORK / "references" / GX / "{acc}.without_flagged.fna"),
         log=WORK / "references" / GX / "{acc}.without_flagged.log",
@@ -276,8 +344,8 @@ rule foreign_controls:
 rule extract:
     input:
         fasta=rules.fetch.output.fasta,
-        report=rules.screen.output.report,
-        taxonomy=rules.screen.output.taxonomy,
+        report=lambda w: screen_files(w.acc)["report"],
+        taxonomy=lambda w: screen_files(w.acc)["taxonomy"],
     output:
         fasta=WORK / "{acc}" / "{key}" / "segments.fna",
         tsv=WORK / "{acc}" / "{key}" / "segments.tsv",
@@ -444,7 +512,7 @@ rule decide:
 rule clean:
     input:
         fasta=LIB / "genomes" / "{acc}" / "original" / "{acc}.fna",
-        report=LIB / "genomes" / "{acc}" / "fcs_gx" / GX / "fcs_gx_report.txt",
+        report=lambda w: screen_files(w.acc)["report"],
         removals=rules.decide.output.removals,
         decisions=rules.decide.output.decisions,
     output:
@@ -499,12 +567,21 @@ def report_spec(acc):
         dec, run = "-", G(acc) / "original" / "record.json"
     else:
         dec, run = RUN(acc) / "decisions.tsv", RUN(acc) / "run.json"
-    return f"'{acc}|{dec}|{run}|{G(acc) / 'original' / 'record.json'}|{rel or '-'}|{','.join(ladder) or '-'}'"
+    if DOWNLOAD_ONLY:
+        screen = "-"
+    elif acc in PRECOMPUTED:
+        screen = f"precomputed:{G(acc) / 'fcs_gx' / 'precomputed' / PHASH[acc] / 'check.json'}"
+    else:
+        screen = f"run:{GX}"
+    return (f"'{acc}|{dec}|{run}|{G(acc) / 'original' / 'record.json'}|{rel or '-'}|{','.join(ladder) or '-'}"
+            f"|{screen}'")
 
 
 rule report:
     input:
         members=rules.combine.output.members,
+        checks=lambda w: [G(g.key) / "fcs_gx" / "precomputed" / PHASH[g.key] / "check.json"
+                          for g in HOSTS[w.host].genomes if g.key in PRECOMPUTED],
     output:
         regions=LIB / "hosts" / "{host}" / "{hkey}" / "contamination_report.tsv",
         genomes=LIB / "hosts" / "{host}" / "{hkey}" / "genome_summary.tsv",

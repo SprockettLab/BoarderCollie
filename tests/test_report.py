@@ -31,7 +31,8 @@ def test_host_report_rows_and_summary(tmp_path):
     rec.write_text(json.dumps({"tax_id": 1, "md5": "m1", "report": {"organism": {"organism_name": "Testus primus"}}}))
     out_r, out_g = tmp_path / "regions.tsv", tmp_path / "genomes.tsv"
     write_host_report("Test_host", [{"accession": "GCA_T.1", "decisions": str(dec), "run": str(run), "record": str(rec),
-                                     "relative": "GCA_R.1", "ladder": ["GCA_L.1"]}], out_r, out_g)
+                                     "relative": "GCA_R.1", "ladder": ["GCA_L.1"], "screen": "run:2023-01-24"}],
+                      out_r, out_g)
     r = {x["region_id"]: x for x in rows(out_r)}
     assert (r["a"]["action"], r["a"]["reason"]) == ("keep", RULE_MEANING["3"])
     assert (r["b"]["action"], r["b"]["reason"]) == ("remove", RULE_MEANING["6"])
@@ -41,6 +42,7 @@ def test_host_report_rows_and_summary(tmp_path):
     assert (g["regions_flagged"], g["regions_kept"], g["regions_removed"]) == ("3", "1", "2")
     assert (g["status"], g["relative_alignment_test"], g["host_controls"]) == ("decided", "applied", "6 of 6")
     assert (g["removed_bp"], g["relative"], g["ladder"], g["run_key"]) == ("1250", "GCA_R.1", "GCA_L.1", "k1")
+    assert g["fcs_gx"] == "FCS-GX run by BoarderCollie (database build 2023-01-24)"
 
 
 def test_download_only_genome(tmp_path):
@@ -51,3 +53,4 @@ def test_download_only_genome(tmp_path):
     assert rows(out_r) == []
     g = rows(out_g)[0]
     assert g["status"] == "not screened (download_only)" and g["original_md5"] == "abc" and g["organism"] == "tax-id 9606"
+    assert g["fcs_gx"] == "not screened"
