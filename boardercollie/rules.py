@@ -49,6 +49,8 @@ TEST_APPLIED = "applied"
 TEST_NOT_APPLIED = "not applied: host controls failed"
 TEST_NOT_NEEDED = "not needed: FCS-GX flagged no regions"
 TEST_NONE_TESTABLE = "not needed: every flagged region kept as a retrovirus or too short for the test"
+TEST_NO_RELATIVE = "not applied: no relative genome found"
+TEST_NO_LADDER = "not applied: no comparison genomes found"
 FCS_REMOVING_ACTIONS = ("EXCLUDE", "TRIM", "FIX")
 
 
@@ -217,8 +219,14 @@ def decide_genome(
     controls: list[Control],
     settings: dict,
     lineage: Callable[[int], set[int]],
+    test_unavailable: str | None = None,
 ) -> GenomeResult:
-    """Apply rules 1 to 6 to every flagged region of one genome."""
+    """Apply rules 1 to 6 to every flagged region of one genome.
+
+    test_unavailable: why the relative-genome alignment test cannot be run at all
+    (TEST_NO_RELATIVE or TEST_NO_LADDER); the genome then gets FCS-GX's own actions,
+    as when its host controls fail.
+    """
     kept_taxon = {r.region_id for r in regions if is_kept_taxon(r.fcs_top_taxid, settings, lineage)}
     too_short = {r.region_id for r in regions
                  if r.region_id not in kept_taxon and r.length < settings["min_tested_length"]}
@@ -238,20 +246,21 @@ def decide_genome(
                 out.append(_fcs_decision(r, "too_short", short_label, settings, "too short for the alignment test"))
         return GenomeResult(accession, "decided", TEST_NONE_TESTABLE, h_ok, h_n, f_ok, f_n, out)
 
-    if not passed:
+    if test_unavailable or not passed:
+        label = test_unavailable or TEST_NOT_APPLIED
         if settings["on_controls_failed"] == "stop":
-            return GenomeResult(accession, "stopped", TEST_NOT_APPLIED, h_ok, h_n, f_ok, f_n, [])
+            return GenomeResult(accession, "stopped", label, h_ok, h_n, f_ok, f_n, [])
         out = []
         for r in regions:
             if is_kept_taxon(r.fcs_top_taxid, settings, lineage):
-                out.append(_decision(r, "2", "host", "keep", TEST_NOT_APPLIED, settings))
+                out.append(_decision(r, "2", "host", "keep", label, settings))
             elif r.fcs_action in FCS_REMOVING_ACTIONS:
-                out.append(_decision(r, "fcs_only", "foreign", "remove", TEST_NOT_APPLIED, settings,
+                out.append(_decision(r, "fcs_only", "foreign", "remove", label, settings,
                                      note=f"FCS-GX action {r.fcs_action} applied without the relative-genome alignment test"))
             else:
-                out.append(_decision(r, "fcs_only", "host", "keep", TEST_NOT_APPLIED, settings,
+                out.append(_decision(r, "fcs_only", "host", "keep", label, settings,
                                      note=f"FCS-GX action {r.fcs_action}: no removal"))
-        return GenomeResult(accession, "fcs_only", TEST_NOT_APPLIED, h_ok, h_n, f_ok, f_n, out)
+        return GenomeResult(accession, "fcs_only", label, h_ok, h_n, f_ok, f_n, out)
 
     decided: dict[str, Decision] = {}
     pending: list[Region] = []

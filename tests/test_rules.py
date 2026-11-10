@@ -221,3 +221,17 @@ def test_nothing_long_enough_to_test(settings):
     d = by_id(result)
     assert (d["s"].rule, d["s"].action) == ("too_short", "remove")
     assert (d["erv"].rule, d["erv"].action) == ("2", "keep")
+
+@pytest.mark.parametrize("why", ["not applied: no relative genome found", "not applied: no comparison genomes found"])
+def test_no_references_falls_back_to_fcs_only(settings, why):
+    from boardercollie.rules import TEST_NO_LADDER, TEST_NO_RELATIVE
+    assert why in (TEST_NO_RELATIVE, TEST_NO_LADDER)
+    # Controls pass and the region aligns, but without references the test is not run.
+    result = decide_genome("GCA_TEST.1", [region("a", [ladder(0.9)], action="EXCLUDE"),
+                                          region("erv", taxid=39068, action="EXCLUDE")],
+                           good_controls(), settings, lineage, why)
+    assert result.status == "fcs_only" and result.relative_alignment_test == why
+    d = by_id(result)
+    assert (d["a"].rule, d["a"].action) == ("fcs_only", "remove")
+    assert (d["erv"].rule, d["erv"].action) == ("2", "keep")
+    assert all(x.relative_alignment_test == why for x in result.decisions)

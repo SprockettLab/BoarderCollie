@@ -104,9 +104,9 @@ def cmd_decide(a):
     Path(a.out_lineage).write_text("".join(f"{acc}\t{p}\n" for acc, p in lineage))
     res = decide_from_files(a.accession, Path(a.segments), Path(a.segments_fasta), Path(a.composition),
                             Path(a.foreign), pafs, Path(a.trf), Path(a.own_copies),
-                            [p for _, p in lineage], Path(a.distant_copies),
+                            [p for _, p in lineage], Path(a.distant_copies) if a.distant_copies else None,
                             cfg.settings, Path(a.taxonomy_cache), Path(a.out_decisions), Path(a.out_removals),
-                            a.settings_hash)
+                            a.settings_hash, test_unavailable=a.test_unavailable)
     print(f"{a.accession}: {res.status}; relative-genome alignment test {res.relative_alignment_test}")
 
 
@@ -167,10 +167,13 @@ def main(argv=None):
 
     s = sub.add_parser("decide"); s.set_defaults(f=cmd_decide)
     for k in ("config", "accession", "segments", "segments-fasta", "composition", "foreign", "trf",
-              "own-copies", "own-record", "distant-copies", "taxonomy-cache", "out-decisions", "out-removals",
+              "own-copies", "own-record", "taxonomy-cache", "out-decisions", "out-removals",
               "out-lineage", "settings-hash"):
         s.add_argument(f"--{k}", required=True)
-    s.add_argument("--alignment", action="append", required=True, help="reference:role:paf")
+    s.add_argument("--distant-copies", default=None, help="copies in the most distant comparison genome; absent when there is none")
+    s.add_argument("--test-unavailable", choices=("no_relative", "no_ladder"), default=None,
+                   help="why the relative-genome alignment test cannot run; FCS-GX's own actions are applied")
+    s.add_argument("--alignment", action="append", default=[], help="reference:role:paf")
     s.add_argument("--lineage-copies", nargs="*", default=[], help="accession=record=paf")
 
     s = sub.add_parser("filter-report"); s.set_defaults(f=cmd_filter_report)

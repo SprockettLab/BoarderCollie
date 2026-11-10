@@ -8,7 +8,8 @@ from pathlib import Path
 from .decisions_io import write_decisions
 from .fasta import read_fasta
 from .paf import count_copies, read_paf, summarize
-from .rules import Alignment, CompositionEvidence, Control, Region, RepeatEvidence, decide_genome
+from .rules import (TEST_NO_LADDER, TEST_NO_RELATIVE, Alignment, CompositionEvidence, Control, Region, RepeatEvidence,
+                    decide_genome)
 from .trf import read_trf_ngs
 
 REMOVAL_COLUMNS = ("region_id", "seq_id", "start", "end", "length", "seq_len", "fcs_action", "source")
@@ -48,13 +49,14 @@ def decide_from_files(
     trf_ngs: Path,
     own_copies_paf: Path,
     lineage_copies_pafs: list[Path],
-    distant_copies_paf: Path,
+    distant_copies_paf: Path | None,
     settings: dict,
     taxonomy_cache: Path,
     out_decisions: Path,
     out_removals: Path,
     settings_hash: str,
     fetch_taxonomy=None,
+    test_unavailable: str | None = None,
 ):
     segs = read_tsv(segments_tsv)
     flagged = [s for s in segs if s["type"] == "flagged"]
@@ -83,7 +85,7 @@ def decide_from_files(
     for p in lineage_copies_pafs:
         for q, n in count_copies(read_paf(p), cover).items():
             lineage[q] = lineage.get(q, 0) + n
-    distant = count_copies(read_paf(distant_copies_paf), cover)
+    distant = count_copies(read_paf(distant_copies_paf), cover) if distant_copies_paf else {}
     comp = {c["id"]: c for c in read_tsv(composition_tsv)}
 
     regions = []
@@ -104,7 +106,8 @@ def decide_from_files(
     controls += [Control(k, "foreign", alignments(k)) for k in foreign]
 
     lookup = lineage_lookup([r.fcs_top_taxid for r in regions if r.fcs_top_taxid], taxonomy_cache, fetch_taxonomy)
-    result = decide_genome(accession, regions, controls, settings, lookup)
+    unavailable = {"no_relative": TEST_NO_RELATIVE, "no_ladder": TEST_NO_LADDER}.get(test_unavailable or "")
+    result = decide_genome(accession, regions, controls, settings, lookup, unavailable)
     write_decisions(result, out_decisions, settings_hash)
 
     seq_len = {s["id"]: s["seq_len"] for s in flagged}

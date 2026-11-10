@@ -68,10 +68,26 @@ def test_missing_and_duplicate():
                                      "genomes": [{"accession": "A.1", "relative": "R.1"}] * 2}]))
 
 
-def test_relative_and_ladder_required():
+def test_relative_and_ladder_automatic_when_blank():
+    for rel in (None, "", "none", "NA", "auto"):
+        for lad in (None, "", "none", "NA", [], ["NA"]):
+            h = {"name": "x", "genomes": [{"accession": "A.1", "relative": rel}]}
+            if lad is not None:
+                h["ladder"] = lad
+            c = parse_config(minimal(hosts=[h]))
+            assert c.hosts[0].genomes[0].relative is None and c.hosts[0].ladder == []
+    c = parse_config(minimal(hosts=[{"name": "x", "genomes": ["A.1"]}]))
+    assert c.hosts[0].genomes[0].relative is None
+
+
+def test_ladder_settings_checked():
+    for bad in ([], ["order", "family"], ["family", "family"], ["kingdom"]):
+        with pytest.raises(ConfigError):
+            parse_config(minimal(settings={"ladder_ranks": bad}))
     with pytest.raises(ConfigError):
-        parse_config(minimal(hosts=[{"name": "x", "ladder": ["L.1"], "genomes": ["A.1"]}]))
-    with pytest.raises(ConfigError):
-        parse_config(minimal(hosts=[{"name": "x", "genomes": [{"accession": "A.1", "relative": "R.1"}]}]))
+        parse_config(minimal(settings={"relative_min_scaffold_n50": -1}))
+
+
+def test_relative_must_differ():
     with pytest.raises(ConfigError):
         parse_config(minimal(hosts=[{"name": "x", "ladder": ["R.1"], "genomes": [{"accession": "A.1", "relative": "R.1"}]}]))
