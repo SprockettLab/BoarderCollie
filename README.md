@@ -60,6 +60,26 @@ Outputs, under `library_dir`:
 
 and under `index_dir`: `bt2/<name>/<host key>/` and `minimap2/<name>/<host key>/`.
 
+A host with `reference_out: <path>` in the config also gets its joined reference at that fixed path (a hard link, or a copy on another file system), with `<path>.members.tsv` beside it.
+
+## Use from another Snakemake workflow
+
+Another workflow (such as MAGmaker) can load BoarderCollie as a Snakemake module and ask for the cleaned host reference at a path it chooses:
+
+```
+module boardercollie:
+    snakefile: "/path/to/BoarderCollie/workflow/Snakefile"
+    config: config["boardercollie"]
+
+use rule * from boardercollie as boardercollie_*
+```
+
+The `boardercollie` section of the calling workflow's config is a BoarderCollie config.
+Give each host `reference_out` set to the path the calling workflow reads, for example MAGmaker's `host_filter: genome`; asking for that file runs everything needed to make it.
+Point `snakefile` at a local clone of this repository: the workflow takes the `boardercollie` package and `resources/` from that clone, so the package need not be installed in the calling workflow's environment.
+Every step names `workflow/envs/boardercollie.yaml`, used when the calling workflow runs with `--use-conda`.
+Snakemake records how each file was made in the `.snakemake` folder of the directory it runs from; a library made in one directory without `--use-conda` and later run from the same directory with it would be remade once, so keep one way of running per working directory.
+
 ## Development
 
 ```

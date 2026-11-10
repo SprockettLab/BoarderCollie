@@ -31,6 +31,7 @@ hosts:
       - GCA_963575115.1
     ladder: auto                     # or a list, e.g. [GCA_963574265.1, GCA_000001405.29]
     indexes: [bowtie2, minimap2]
+    # reference_out: /path/to/Chlorocebus_spp.fna   # optional: the joined reference also written here
   # - name: My_host
   #   genomes:
   #     - {fasta: /path/to/assembly.fna, tax_id: 9534, relative: GCF_047675955.1}
