@@ -71,9 +71,12 @@ def logged(step, cmd):
 
     The command still stops at its first error; the row after it records that status
     and the step then fails as it would without the log.
+    The run id is read from the environment when the step runs, never written into the
+    command: Snakemake reruns a finished step whose command text has changed, so a run id
+    in the text would make every new run redo every step, FCS-GX screens included.
     """
     row = (r"""printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" """
-           + f'"{RUN_ID}" "$1" "{step}" "{{wildcards}}" "$2" "$3" >> "{RUN_LOG}"')
+           + f'"${{{{BOARDERCOLLIE_RUN_ID:-unknown}}}}" "$1" "{step}" "{{wildcards}}" "$2" "$3" >> "{RUN_LOG}"')
     return (f"_bclog() {{{{ {row}; }}}}\n_bclog start '' ''\nset +e\n( set -e\n{cmd}\n)\n"
             "_bcs=$?\nset -e\n_bclog finish \"$_bcs\" \"{output}\"\nexit $_bcs")
 
