@@ -44,7 +44,8 @@ It is much faster when the database is on local storage: copy it once per run wi
 FCS-GX reports made earlier can be used instead of running FCS-GX.
 Put them in one folder and name it in the config as `fcs_gx_reports`.
 Each genome (and each relative or comparison genome) needs both its reports, named after its accession or FASTA file name: `<accession>.fcs_gx_report.txt` and `<accession>.taxonomy.rpt`, or as FCS-GX names them, `<accession>.<tax-id>.fcs_gx_report.txt` and `<accession>.<tax-id>.taxonomy.rpt`.
-Before they are used, every sequence the reports name must be in the genome with the same length, and the tax-id in the report header (when given) must be the genome's; otherwise the run stops.
+Before they are used, every sequence the reports name must be in the genome with the same length, and both reports must come from the same FCS-GX run; otherwise the run stops.
+FCS-GX report headers do not state the tax-id it was run with, so that cannot be checked; the division FCS-GX assumed (for example `anml:primates`) is recorded in `check.json`.
 Genomes without reports in the folder are screened as usual, which needs `fcs_gx_db`.
 All reports must come from one database build: the build is read from the report headers, or given as `fcs_gx_db_build`.
 Results made with these reports get their own run key, and `genome_summary.tsv` says where each genome's FCS-GX results came from.

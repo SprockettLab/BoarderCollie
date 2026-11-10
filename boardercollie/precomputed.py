@@ -9,8 +9,11 @@ or as run_gx.py names them:
     <key>.<tax-id>.fcs_gx_report.txt  and  <key>.<tax-id>.taxonomy.rpt
 
 Before a pair is used it is checked against the genome: every sequence the reports
-name must be in the genome with the same length, the reports must parse, and the
-tax-id the report was run with (when its header states one) must be the genome's.
+name must be in the genome with the same length, the reports must parse, and the two
+reports must come from the same FCS-GX run (same genome-hash in their headers).
+FCS-GX 0.5.5 headers state the database build, the asserted division, the FCS-GX
+version and a genome-hash, but not the tax-id, so the tax-id cannot be checked; the
+asserted division is recorded for the reader.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from typing import Any
 
 from .fcs_report import ACTION_COLUMNS, TAXONOMY_COLUMNS, ReportError, _header, read_candidates
 
+HEADER_FIELDS = ("build-date", "asserted-div", "genome-hash", "git-rev")
 ACTION_SUFFIX = ".fcs_gx_report.txt"
 TAXONOMY_SUFFIX = ".taxonomy.rpt"
 
@@ -51,7 +55,8 @@ def find_reports(folder: str | Path, key: str) -> tuple[Path, Path] | None:
 
 
 def header_info(path: str | Path) -> dict[str, Any]:
-    """The run details FCS-GX writes on a report's first line (##[[name, major, minor], {...}])."""
+    """The run details FCS-GX writes on a report's first line (##[[name, major, minor], {...}]):
+    build-date, asserted-div, genome-hash and git-rev (the FCS-GX version), where present."""
     with open(path) as fh:
         first = fh.readline()
     if not first.startswith("##"):
@@ -67,7 +72,7 @@ def header_info(path: str | Path) -> dict[str, Any]:
         for k, v in d.items():
             if isinstance(v, dict):
                 walk(v)
-            elif k in ("build-date", "tax-id") and k not in out:
+            elif k in HEADER_FIELDS and k not in out:
                 out[k] = v
     walk(meta)
     return out
@@ -109,7 +114,7 @@ def check_reports(action: str | Path, taxonomy: str | Path, fasta: str | Path, t
     """Check a precomputed report pair against its genome; return what was checked.
 
     Raises ReportError on any mismatch: a sequence the genome lacks, a different
-    length, a region past the end of its sequence, or a different tax-id.
+    length, a region past the end of its sequence, or reports from two different FCS-GX runs.
     """
     action, taxonomy = Path(action), Path(taxonomy)
     lengths = sequence_lengths(fasta)
@@ -150,10 +155,10 @@ def check_reports(action: str | Path, taxonomy: str | Path, fasta: str | Path, t
         elif int(f[c["seq-len"]]) != lengths[name]:
             problems.append(f"taxonomy report gives {name} length {f[c['seq-len']]}; the genome's is {lengths[name]} bp")
 
-    stated = {header_info(p).get("tax-id") for p in (action, taxonomy)} - {None}
-    stated_ids = {int(t) for t in stated if str(t).isdigit()}
-    if tax_id is not None and stated_ids and stated_ids != {int(tax_id)}:
-        problems.append(f"the reports were run with tax-id {sorted(stated_ids)}; the genome's tax-id is {tax_id}")
+    head_a, head_t = header_info(action), header_info(taxonomy)
+    if head_a.get("genome-hash") and head_t.get("genome-hash") and head_a["genome-hash"] != head_t["genome-hash"]:
+        problems.append(f"the two reports come from different FCS-GX runs "
+                        f"(genome-hash {head_a['genome-hash']} and {head_t['genome-hash']})")
 
     if problems:
         shown = problems[:20]
@@ -167,11 +172,14 @@ def check_reports(action: str | Path, taxonomy: str | Path, fasta: str | Path, t
         "taxonomy_report_sha256_12": _sha(taxonomy),
         "reports_hash": reports_hash(action, taxonomy),
         "database_build": build_date(action, taxonomy),
-        "tax_id_in_reports": sorted(stated_ids) or "not stated",
+        "fcs_gx_version": head_a.get("git-rev", "not stated"),
+        "asserted_division": head_a.get("asserted-div", "not stated"),
+        "fcs_gx_genome_hash": head_a.get("genome-hash", "not stated"),
         "genome_tax_id": tax_id,
+        "tax_id_checked": "no: FCS-GX report headers do not state the tax-id",
         "action_rows": n_action, "taxonomy_rows": n_tax, "regions_to_test": len(candidates),
         "genome_sequences": len(lengths),
-        "checked": "every sequence named is in the genome with the same length; tax-id matches when stated",
+        "checked": "every sequence named is in the genome with the same length; both reports from one FCS-GX run",
     }
 
 
