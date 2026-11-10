@@ -16,7 +16,7 @@ from boardercollie.precomputed import build_date, check_reports, find_reports, h
 
 from test_fcs_report import TAX_HEADER, tax_row
 
-# Header details as FCS-GX 0.5.5 writes them (from a report on demon, 2026-11-06).
+# Header details as FCS-GX 0.5.5 writes them (from a real report, 2026-11-06).
 META = ('{"git-rev": "v0.5.5-9-gfc836c1", "run-date": "Fri Nov  6 12:32:20 2026", '
         '"db": {"build-date": "2023-01-24", "seqs": 3025824, "Gbp": 709.264}, '
         '"run-info": {"agg-cvg": 0.980024, "asserted-div": "anml:primates", '
