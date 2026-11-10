@@ -32,6 +32,13 @@ hosts:
 
 # Every setting has a default (shown here); remove a line to use the default.
 settings:
+  download_only: false             # true: download and join the genomes as they are (no FCS-GX, no checks, no cleaning)
+  checks:                          # turn single checks off; what a check would have kept goes on to the next ones
+    fcs_gx: true                   # off is the same as download_only
+    retrovirus: true               # rule 2
+    related_genome: true           # rule 3
+    lineage_repeat: true           # rule 4
+    repeat_family: true            # rule 5 (rules 3 to 5 all off: no alignment steps, no relatives needed)
   keep_taxa: [11632]               # FCS-GX hits within these NCBI taxa are kept untested (11632 = Retroviridae)
   host_like_min: 0.5               # aligned fraction for host_like
   foreign_like_max: 0.1            # aligned fraction below which a region is foreign_like

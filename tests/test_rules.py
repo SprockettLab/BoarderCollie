@@ -235,3 +235,38 @@ def test_no_references_falls_back_to_fcs_only(settings, why):
     assert (d["a"].rule, d["a"].action) == ("fcs_only", "remove")
     assert (d["erv"].rule, d["erv"].action) == ("2", "keep")
     assert all(x.relative_alignment_test == why for x in result.decisions)
+
+
+def checks(**off):
+    return merge_settings({"checks": {k: False for k in off}})
+
+
+def test_turning_off_a_check_passes_regions_on(settings):
+    erv = region("erv", [ladder(0.0)], taxid=39068)
+    host = region("h", [ladder(0.9)])
+    assert by_id(decide([erv, host], checks(retrovirus=1)))["erv"].action == "remove"
+    d = by_id(decide([erv, host], checks(related_genome=1)))
+    assert (d["h"].rule, d["h"].action) == ("6", "remove") and d["erv"].rule == "2"
+
+
+def test_lineage_repeat_and_repeat_family_switches(settings):
+    rep = RepeatEvidence(0.95, 0.95, "ACGTTGCA" * 4, lineage_copies=2, distant_copies=0)
+    fam = RepeatEvidence(0.9, 0.9, "ACGTTGCA" * 4, lineage_copies=0, distant_copies=0)
+    regions = [region("r", [ladder(0.0)], repeats=rep), region("f", [ladder(0.0)], repeats=fam)]
+    d = by_id(decide(regions, settings))
+    assert (d["r"].rule, d["f"].rule) == ("4", "5")
+    d = by_id(decide(regions, checks(repeat_family=1)))
+    assert (d["r"].rule, d["f"].rule) == ("4", "6")
+    d = by_id(decide(regions, checks(lineage_repeat=1)))
+    assert (d["r"].rule, d["f"].rule) == ("6", "6")
+
+
+def test_all_alignment_checks_off(settings):
+    from boardercollie.rules import TEST_OFF
+    s = checks(related_genome=1, lineage_repeat=1, repeat_family=1)
+    bad = [Control(f"c{i}", "host", [ladder(0.0)]) for i in range(10)]
+    result = decide([region("h", [ladder(0.9)]), region("erv", taxid=39068)], s, controls=bad)
+    assert result.status == "decided" and result.relative_alignment_test == TEST_OFF
+    d = by_id(result)
+    assert (d["h"].rule, d["h"].action) == ("6", "remove")
+    assert (d["erv"].rule, d["erv"].action) == ("2", "keep")

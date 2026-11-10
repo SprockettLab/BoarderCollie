@@ -51,6 +51,7 @@ TEST_NOT_NEEDED = "not needed: FCS-GX flagged no regions"
 TEST_NONE_TESTABLE = "not needed: every flagged region kept as a retrovirus or too short for the test"
 TEST_NO_RELATIVE = "not applied: no relative genome found"
 TEST_NO_LADDER = "not applied: no comparison genomes found"
+TEST_OFF = "not applied: the alignment checks are turned off in the settings"
 FCS_REMOVING_ACTIONS = ("EXCLUDE", "TRIM", "FIX")
 
 
@@ -227,7 +228,16 @@ def decide_genome(
     (TEST_NO_RELATIVE or TEST_NO_LADDER); the genome then gets FCS-GX's own actions,
     as when its host controls fail.
     """
-    kept_taxon = {r.region_id for r in regions if is_kept_taxon(r.fcs_top_taxid, settings, lineage)}
+    checks = settings["checks"]
+    kept_taxon = ({r.region_id for r in regions if is_kept_taxon(r.fcs_top_taxid, settings, lineage)}
+                  if checks["retrovirus"] else set())
+    if not (checks["related_genome"] or checks["lineage_repeat"] or checks["repeat_family"]):
+        # No alignment-based check: no control check either; whatever rule 2 does not keep is removed.
+        out = [_decision(r, "2", "host", "keep", TEST_OFF, settings) if r.region_id in kept_taxon
+               else _decision(r, "6", "foreign", "remove", TEST_OFF, settings) for r in regions]
+        status = "no flagged regions" if not regions else "decided"
+        return GenomeResult(accession, status, TEST_NOT_NEEDED if not regions else TEST_OFF,
+                            0, 0, 0, 0, out)
     too_short = {r.region_id for r in regions
                  if r.region_id not in kept_taxon and r.length < settings["min_tested_length"]}
     tested = {r.region_id for r in regions} - kept_taxon - too_short
@@ -269,9 +279,9 @@ def decide_genome(
             decided[r.region_id] = _decision(r, "2", "host", "keep", TEST_APPLIED, settings)
         elif r.region_id in too_short:
             decided[r.region_id] = _fcs_decision(r, "too_short", short_label, settings, "too short for the alignment test")
-        elif _host_by_alignment(r, settings):
+        elif checks["related_genome"] and _host_by_alignment(r, settings):
             decided[r.region_id] = _decision(r, "3", "host", "keep", TEST_APPLIED, settings)
-        elif _host_lineage_repeat(r, settings):
+        elif checks["lineage_repeat"] and _host_lineage_repeat(r, settings):
             decided[r.region_id] = _decision(r, "4", "host", "keep", TEST_APPLIED, settings)
         else:
             pending.append(r)
@@ -282,7 +292,7 @@ def decide_genome(
     for r in pending:
         x = r.repeats
         match = None
-        if x and x.main_unit and x.main_repeat_cover >= settings["family_repeat_min"] and confirmed:
+        if checks["repeat_family"] and x and x.main_unit and x.main_repeat_cover >= settings["family_repeat_min"] and confirmed:
             best = max(((u, unit_identity(x.main_unit, u, settings["family_period_tolerance"])) for u in confirmed),
                        key=lambda t: t[1])
             if best[1] >= settings["family_unit_min_identity"]:
