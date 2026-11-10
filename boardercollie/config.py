@@ -16,6 +16,8 @@ from typing import Any
 
 import yaml
 
+from .references import is_automatic
+
 DEFAULT_SETTINGS: dict[str, Any] = {
     # Rule 2: FCS-GX hits whose best-match tax-id falls in these NCBI taxa are
     # kept untested. 11632 = Retroviridae (endogenous retroviruses).
@@ -44,6 +46,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "seed": 20261104,
     # Rule 1: what happens to a genome whose host controls fail.
     "on_controls_failed": "fcs_only",
+    # Automatic choice of comparison genomes (when the config leaves them blank).
+    # The closest relative and every comparison genome need at least this scaffold N50.
+    "relative_min_scaffold_n50": 1000000,
+    # One comparison genome per rank, nearest first; the last is rule 4's distant reference.
+    "ladder_ranks": ["family", "order"],
     # Supporting evidence (reported, never deciding).
     "conflict_coding_min": 0.7,
     "conflict_background_percentiles": [1, 99],
@@ -55,6 +62,7 @@ FRACTION_SETTINGS = (
     "control_pass_min", "control_max_n_frac", "conflict_coding_min",
 )
 LINEAGE_RANKS = ("species", "genus", "family", "order")
+LADDER_RANK_ORDER = ("genus", "family", "order", "class")
 INDEX_TYPES = ("bowtie2", "minimap2")
 ON_CONTROLS_FAILED = ("fcs_only", "stop")
 
@@ -129,6 +137,12 @@ def merge_settings(overrides: dict[str, Any] | None) -> dict[str, Any]:
         raise ConfigError("controls_per_segment and background_per_segment must be at least 1")
     if not all(isinstance(t, int) for t in settings["keep_taxa"]):
         raise ConfigError("keep_taxa must be a list of NCBI tax-ids (integers)")
+    if not isinstance(settings["relative_min_scaffold_n50"], int) or settings["relative_min_scaffold_n50"] < 0:
+        raise ConfigError("relative_min_scaffold_n50 must be a non-negative integer")
+    lr = settings["ladder_ranks"]
+    if (not isinstance(lr, list) or not lr or not set(lr) <= set(LADDER_RANK_ORDER) or len(set(lr)) != len(lr)
+            or lr != sorted(lr, key=LADDER_RANK_ORDER.index)):
+        raise ConfigError(f"ladder_ranks must list ranks from {LADDER_RANK_ORDER}, nearest first, each once")
     lo, hi = settings["conflict_background_percentiles"]
     if not 0 <= lo < hi <= 100:
         raise ConfigError("conflict_background_percentiles must be [low, high] with 0 <= low < high <= 100")
@@ -144,6 +158,8 @@ def _genome(entry: Any, host: str) -> GenomeSpec:
     if unknown:
         raise ConfigError(f"host {host}: unknown genome keys {sorted(unknown)}")
     g = GenomeSpec(**entry)
+    if is_automatic(g.relative):
+        g.relative = None
     if bool(g.accession) == bool(g.fasta):
         raise ConfigError(f"host {host}: give either accession or fasta for each genome")
     if g.fasta and not isinstance(g.tax_id, int):
@@ -177,14 +193,16 @@ def parse_config(data: dict[str, Any]) -> Config:
         indexes = h.get("indexes", list(INDEX_TYPES))
         if not set(indexes) <= set(INDEX_TYPES):
             raise ConfigError(f"host {name}: indexes must be from {INDEX_TYPES}")
-        # Automatic choice of relatives and ladder references from the NCBI
-        # taxonomy is not implemented yet; until it is, both are given.
-        ladder = h.get("ladder") or []
-        if not ladder or not all(isinstance(a, str) for a in ladder):
-            raise ConfigError(f"host {name}: ladder must list reference accessions, nearest first")
+        # A blank, none, NA or auto relative or ladder is chosen automatically
+        # from the NCBI taxonomy when the workflow starts (boardercollie.references).
+        ladder = h.get("ladder")
+        if is_automatic(ladder) or ladder == [] or (isinstance(ladder, list) and all(is_automatic(a) for a in ladder)):
+            ladder = []
+        elif not isinstance(ladder, list) or not all(isinstance(a, str) and not is_automatic(a) for a in ladder):
+            raise ConfigError(f"host {name}: ladder must list reference accessions, nearest first, or be left blank")
         for g in genomes:
-            if not g.relative:
-                raise ConfigError(f"host {name}: genome {g.key} needs a relative (automatic choice not available yet)")
+            if g.relative is None:
+                continue
             if g.relative == g.key or g.relative in ladder:
                 raise ConfigError(f"host {name}: genome {g.key}: the relative must differ from the genome and the ladder")
         if set(ladder) & set(keys):

@@ -25,7 +25,10 @@ Every region, test result, rule and threshold is recorded, and the records can b
 ## Configuration
 
 See [`config/config.example.yaml`](config/config.example.yaml).
-A host is a name, its genomes (NCBI assembly accessions, each with its closest relative for now) and a reference ladder; every threshold is a setting with a default.
+A host is a name and its genomes (NCBI assembly accessions or local FASTA files).
+Each genome's closest relative and the host's comparison genomes (reference ladder) are chosen from the NCBI taxonomy unless the config names them.
+Each choice is saved in the library with every candidate considered, and reused on later runs while the genomes and settings are unchanged.
+Every threshold is a setting with a default.
 
 ## Running
 

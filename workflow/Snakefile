@@ -11,6 +11,7 @@
 
 import hashlib
 import json
+import sys
 import re
 from pathlib import Path
 
@@ -18,9 +19,14 @@ import yaml
 
 from boardercollie import __version__
 from boardercollie.config import parse_config, settings_hash
+from boardercollie.references import resolve
 
 CFG = parse_config(config)
 LIB, IDX, WORK = CFG.library_dir, CFG.index_dir, CFG.work_dir
+# Relatives and comparison genomes left blank in the config are chosen from the
+# NCBI taxonomy now, saved in the library with every candidate, and reused later.
+for _line in resolve(CFG, LIB):
+    print("BoarderCollie reference choice:", _line, file=sys.stderr)
 SETTINGS_HASH = settings_hash(CFG.settings)
 RES = Path(workflow.basedir).parent / "resources"
 # The config as used, saved once per run key set; every step reads this copy.
@@ -47,7 +53,7 @@ GENOMES = {}
 for h in CFG.hosts:
     for g in h.genomes:
         GENOMES[g.key] = {"spec": g, "host": h}
-REFERENCES = sorted({g["spec"].relative for g in GENOMES.values()} | {a for h in CFG.hosts for a in h.ladder})
+REFERENCES = sorted(({g["spec"].relative for g in GENOMES.values()} - {None}) | {a for h in CFG.hosts for a in h.ladder})
 ALL = sorted(set(GENOMES) | set(REFERENCES))
 
 
@@ -76,7 +82,7 @@ def W(acc):
 
 def lineage_candidates(acc):
     h = GENOMES[acc]["host"]
-    return sorted({GENOMES[acc]["spec"].relative} | {g.key for g in h.genomes if g.key != acc})
+    return sorted(({GENOMES[acc]["spec"].relative} - {None}) | {g.key for g in h.genomes if g.key != acc})
 
 
 HOSTS = {h.name: h for h in CFG.hosts}
@@ -266,9 +272,10 @@ def decide_inputs(w):
     acc, key = w.acc, w.key
     g = GENOMES[acc]
     d = W(acc)
-    refs = [g["spec"].relative] + [r for r in g["host"].ladder]
+    refs = [r for r in [g["spec"].relative, *g["host"].ladder] if r]
     lineage = lineage_candidates(acc)
-    return {
+    distant = {"distant": d / "copies" / f"{g['host'].ladder[-1]}.paf"} if g["host"].ladder else {}
+    return {**distant,
         "segments": d / "segments.tsv",
         "fasta": d / "segments.fna",
         "composition": d / "composition.tsv",
@@ -278,7 +285,6 @@ def decide_inputs(w):
         "own": d / "copies" / "own.paf",
         "lineage": [d / "copies" / f"{r}.paf" for r in lineage],
         "lineage_records": [G(r) / "original" / "record.json" for r in lineage],
-        "distant": d / "copies" / f"{g['host'].ladder[-1]}.paf",
         "record": G(acc) / "original" / "record.json",
     }
 
@@ -286,8 +292,15 @@ def decide_inputs(w):
 def decide_args(w):
     g = GENOMES[w.acc]
     d = W(w.acc)
-    al = [f"--alignment {g['spec'].relative}:relative:{d / 'align' / (g['spec'].relative + '.paf')}"]
-    al += [f"--alignment {r}:ladder:{d / 'align' / (r + '.paf')}" for r in g["host"].ladder]
+    rel, ladder = g["spec"].relative, g["host"].ladder
+    al = [f"--alignment {rel}:relative:{d / 'align' / (rel + '.paf')}"] if rel else []
+    al += [f"--alignment {r}:ladder:{d / 'align' / (r + '.paf')}" for r in ladder]
+    if ladder:
+        al.append(f"--distant-copies {d / 'copies' / (ladder[-1] + '.paf')}")
+    if not rel:
+        al.append("--test-unavailable no_relative")
+    elif not ladder:
+        al.append("--test-unavailable no_ladder")
     lin = " ".join(f"{r}={G(r) / 'original' / 'record.json'}={d / 'copies' / (r + '.paf')}" for r in lineage_candidates(w.acc))
     return " ".join(al) + (f" --lineage-copies {lin}" if lin else "")
 
@@ -306,7 +319,7 @@ rule decide:
         "python -m boardercollie.cli decide --config {CONFIGFILE} --accession {wildcards.acc} "
         "--segments {input.segments} --segments-fasta {input.fasta} --composition {input.composition} "
         "--foreign {input.foreign} --trf {input.trf} --own-copies {input.own} --own-record {input.record} "
-        "--distant-copies {input.distant} --taxonomy-cache {output.taxonomy} --out-decisions {output.decisions} "
+        "--taxonomy-cache {output.taxonomy} --out-decisions {output.decisions} "
         "--out-removals {output.removals} --out-lineage {output.lineage} --settings-hash {SETTINGS_HASH} {params.args}"
 
 

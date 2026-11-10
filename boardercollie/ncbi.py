@@ -34,6 +34,21 @@ def genome_report(accession: str) -> dict:
     return reports[0]
 
 
+def genomes_under(taxid: int, reference_only: bool = False) -> list[dict]:
+    """Every current, non-atypical assembly record under an NCBI taxon (all pages)."""
+    params = {"filters.assembly_version": "current", "filters.exclude_atypical": "true", "page_size": "1000"}
+    if reference_only:
+        params["filters.reference_only"] = "true"
+    out, token = [], None
+    while True:
+        q = dict(params, **({"page_token": token} if token else {}))
+        d = json.loads(_get(f"{API}/genome/taxon/{int(taxid)}/dataset_report?{urllib.parse.urlencode(q)}"))
+        out.extend(d.get("reports") or [])
+        token = d.get("next_page_token")
+        if not token:
+            return out
+
+
 def download_genome(accession: str, out_fasta: Path) -> str:
     """Download the genome FASTA, check it against NCBI's md5, write it; returns the md5."""
     url = f"{API}/genome/accession/{accession}/download?include_annotation_type=GENOME_FASTA"
@@ -52,6 +67,11 @@ def download_genome(accession: str, out_fasta: Path) -> str:
     tmp.write_bytes(data)
     tmp.rename(out_fasta)
     return md5
+
+
+def ranks_of(taxids) -> dict[int, dict[str, int]]:
+    """tax-id -> {rank: tax-id} from the NCBI classification."""
+    return {t: v["ranks"] for t, v in taxonomy(taxids).items()}
 
 
 def taxonomy(taxids) -> dict[int, dict]:

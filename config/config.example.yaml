@@ -10,24 +10,25 @@ fcs_gx_db: /path/to/fcs_gx/gxdb   # ideally a fast local copy for the run: scrip
 # Optional: the database build date, if the database folder has no all.meta.jsonl.
 # fcs_gx_db_build: "2023-01-24"
 
-# Each host: a name, its genomes, and the reference ladder. The cleaned genomes
-# of a host are joined into one reference named after the host.
-# Each genome is an NCBI assembly accession with its closest relative (until
-# automatic choice from the NCBI taxonomy is added), or a local FASTA with its
-# NCBI tax-id. The ladder lists reference genomes at increasing distance; the
-# last one is the distant reference used by rule 4.
+# Each host: a name, its genomes, and the reference ladder (comparison genomes).
+# The cleaned genomes of a host are joined into one reference named after the host.
+# Each genome is an NCBI assembly accession or a local FASTA with its NCBI tax-id.
+# A genome's closest relative and the host's ladder are chosen from the NCBI
+# taxonomy when left out or set to blank, none, NA or auto; naming an accession
+# forces the choice. The ladder lists genomes at increasing distance; the last
+# one is the distant reference used by rule 4.
 hosts:
   - name: Chlorocebus_spp
     genomes:
-      - {accession: GCF_047675955.1, relative: GCA_023783515.1}
-      - {accession: GCA_023783515.1, relative: GCF_047675955.1}
-      - {accession: GCA_963575115.1, relative: GCF_047675955.1}
-    ladder: [GCA_963574265.1, GCF_049354715.1, GCA_000001405.29]
+      - {accession: GCF_047675955.1}                             # relative chosen automatically
+      - {accession: GCA_023783515.1, relative: GCF_047675955.1}  # relative named
+      - GCA_963575115.1
+    ladder: auto                     # or a list, e.g. [GCA_963574265.1, GCA_000001405.29]
     indexes: [bowtie2, minimap2]
   # - name: My_host
   #   genomes:
   #     - {fasta: /path/to/assembly.fna, tax_id: 9534, relative: GCF_047675955.1}
-  #   ladder: [GCA_963574265.1, GCA_000001405.29]
+  #   ladder: auto
 
 # Every setting has a default (shown here); remove a line to use the default.
 settings:
@@ -48,5 +49,7 @@ settings:
   control_max_n_frac: 0.1          # a control window is redrawn above this fraction of N
   seed: 20261104
   on_controls_failed: fcs_only     # fcs_only or stop
+  relative_min_scaffold_n50: 1000000  # automatic choice: relatives and ladder genomes need this scaffold N50
+  ladder_ranks: [family, order]    # automatic ladder: one genome per rank, nearest first
   conflict_coding_min: 0.7         # coding fraction reported as a sign of bacterial DNA
   conflict_background_percentiles: [1, 99]
