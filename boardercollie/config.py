@@ -10,6 +10,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -130,6 +132,35 @@ class Config:
 def settings_hash(settings: dict[str, Any]) -> str:
     text = json.dumps(settings, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def write_if_changed(path: str | Path, text: str) -> bool:
+    """Write text to path unless the file already holds exactly that text.
+
+    The text is written to a temporary file in the same folder and renamed over the
+    path, so a reader sees either the old file or the new one, never part of one.
+    Returns True when the file was written.
+    """
+    path = Path(path)
+    try:
+        if path.read_text() == text:
+            return False
+    except FileNotFoundError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        # mkstemp makes the file readable by its owner only; give it the usual permissions.
+        umask = os.umask(0)
+        os.umask(umask)
+        os.chmod(tmp, 0o666 & ~umask)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    return True
 
 
 def merge_settings(overrides: dict[str, Any] | None) -> dict[str, Any]:
