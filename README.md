@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/boardercollie_logo.png" alt="BoarderCollie logo" width="240">
+</p>
+
 # BoarderCollie
 
 Host read removal in metagenomics aligns reads to a host genome and discards whatever aligns.
