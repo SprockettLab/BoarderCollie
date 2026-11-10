@@ -34,7 +34,7 @@ os.environ["PYTHONPATH"] = os.pathsep.join([str(REPO)] + [p for p in os.environ.
                                                            if p and p != str(REPO)])
 
 from boardercollie import __version__
-from boardercollie.config import parse_config, settings_hash
+from boardercollie.config import parse_config, settings_hash, write_if_changed
 from boardercollie.precomputed import build_date, find_reports, reports_hash
 from boardercollie.references import resolve
 
@@ -130,10 +130,12 @@ onsuccess:
 onerror:
     log_row("run_finish", status=1, detail=f"a step failed; Snakemake log: {log}")
 RES = REPO / "resources"
-# The config as used, saved once per run key set; every step reads this copy.
+# The config as used; every step reads this copy. The workflow is read again by every
+# cluster job (a calling workflow's jobs too), so the file is written only when its
+# contents change, and then whole (written beside it and renamed): a step reading it
+# never sees it half written.
 CONFIGFILE = WORK / "config.used.yaml"
-CONFIGFILE.parent.mkdir(parents=True, exist_ok=True)
-CONFIGFILE.write_text(yaml.safe_dump(config, sort_keys=True))
+write_if_changed(CONFIGFILE, yaml.safe_dump(config, sort_keys=True))
 
 
 # Genomes to clean, with their host settings; every accession to fetch and screen.
@@ -214,7 +216,10 @@ def run_key(acc):
 
 
 def host_key(h):
-    return hashlib.sha256(json.dumps([run_key(g.key) for g in h.genomes]).encode()).hexdigest()[:12]
+    # The genomes are named in the key: a run key leaves out the genome (its folder
+    # names it), so two hosts with different genomes and the same settings would
+    # otherwise share a key, and a changed genome list would overwrite the old reference.
+    return hashlib.sha256(json.dumps([[g.key, run_key(g.key)] for g in h.genomes]).encode()).hexdigest()[:12]
 
 
 def G(acc):
@@ -266,9 +271,18 @@ rule all:
         TARGETS,
 
 
+def fetch_input(w):
+    """A local FASTA is an input of its fetch step, so a file replaced at the same path
+    (newer than the library copy) is copied again; an accession has no input."""
+    spec = GENOMES[w.acc]["spec"] if w.acc in GENOMES else None
+    return [spec.fasta] if spec and spec.fasta else []
+
+
 rule fetch:
     conda:
         "envs/boardercollie.yaml"
+    input:
+        fetch_input,
     output:
         fasta=LIB / "genomes" / "{acc}" / "original" / "{acc}.fna",
         record=LIB / "genomes" / "{acc}" / "original" / "record.json",
