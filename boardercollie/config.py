@@ -17,30 +17,32 @@ from typing import Any
 import yaml
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    # Rule R0: FCS-GX hits whose best-match tax-id falls in these NCBI taxa are
+    # Rule 2: FCS-GX hits whose best-match tax-id falls in these NCBI taxa are
     # kept untested. 11632 = Retroviridae (endogenous retroviruses).
     "keep_taxa": [11632],
     # Aligned fraction (segment bases in at least one alignment / length).
     "host_like_min": 0.5,
     "foreign_like_max": 0.1,
-    # Rule R1: a match to the closest relative counts only when the relative's
+    # Rule 3: a match to the closest relative counts only when the relative's
     # sequence extends at least this far beyond the match on one side.
     "embedded_flank_bp": 10000,
-    # Rule R2: host-lineage tandem repeat.
+    # Rule 4: host-lineage tandem repeat.
     "repeat_trf_min": 0.8,
     "repeat_copy_min_cover": 0.5,
     "repeat_lineage_rank": "genus",
-    # Rule R2b: repeat family.
+    # Rule 5: repeat family.
     "family_repeat_min": 0.5,
     "family_unit_min_identity": 0.8,
     "family_period_tolerance": 0.1,
+    # Regions shorter than this get FCS-GX's own action: too short to align reliably.
+    "min_tested_length": 300,
     # Controls.
     "controls_per_segment": 3,
     "background_per_segment": 100,
     "control_pass_min": 0.8,
     "control_max_n_frac": 0.1,
     "seed": 20261104,
-    # Rule C: what happens to a genome whose host controls fail.
+    # Rule 1: what happens to a genome whose host controls fail.
     "on_controls_failed": "fcs_only",
     # Supporting evidence (reported, never deciding).
     "conflict_coding_min": 0.7,
@@ -79,6 +81,7 @@ class GenomeSpec:
 class HostSpec:
     name: str
     genomes: list[GenomeSpec]
+    ladder: list[str]
     indexes: list[str] = field(default_factory=lambda: list(INDEX_TYPES))
 
 
@@ -90,6 +93,7 @@ class Config:
     fcs_gx_db: Path
     hosts: list[HostSpec]
     settings: dict[str, Any]
+    fcs_gx_db_build: str | None = None
 
     def settings_hash(self) -> str:
         """Short hash of the settings, part of every result's run key."""
@@ -118,7 +122,7 @@ def merge_settings(overrides: dict[str, Any] | None) -> dict[str, Any]:
         raise ConfigError(f"repeat_lineage_rank must be one of {LINEAGE_RANKS}")
     if settings["on_controls_failed"] not in ON_CONTROLS_FAILED:
         raise ConfigError(f"on_controls_failed must be one of {ON_CONTROLS_FAILED}")
-    for key in ("embedded_flank_bp", "controls_per_segment", "background_per_segment", "seed"):
+    for key in ("embedded_flank_bp", "controls_per_segment", "background_per_segment", "seed", "min_tested_length"):
         if not isinstance(settings[key], int) or settings[key] < 0:
             raise ConfigError(f"{key} must be a non-negative integer")
     if not settings["controls_per_segment"] or not settings["background_per_segment"]:
@@ -151,7 +155,7 @@ def parse_config(data: dict[str, Any]) -> Config:
     for key in ("library_dir", "index_dir", "work_dir", "fcs_gx_db", "hosts"):
         if key not in data:
             raise ConfigError(f"missing required key: {key}")
-    unknown = set(data) - {"library_dir", "index_dir", "work_dir", "fcs_gx_db", "hosts", "settings"}
+    unknown = set(data) - {"library_dir", "index_dir", "work_dir", "fcs_gx_db", "fcs_gx_db_build", "hosts", "settings"}
     if unknown:
         raise ConfigError(f"unknown top-level keys: {sorted(unknown)}")
     if not isinstance(data["hosts"], list) or not data["hosts"]:
@@ -173,7 +177,19 @@ def parse_config(data: dict[str, Any]) -> Config:
         indexes = h.get("indexes", list(INDEX_TYPES))
         if not set(indexes) <= set(INDEX_TYPES):
             raise ConfigError(f"host {name}: indexes must be from {INDEX_TYPES}")
-        hosts.append(HostSpec(name=name, genomes=genomes, indexes=list(indexes)))
+        # Automatic choice of relatives and ladder references from the NCBI
+        # taxonomy is not implemented yet; until it is, both are given.
+        ladder = h.get("ladder") or []
+        if not ladder or not all(isinstance(a, str) for a in ladder):
+            raise ConfigError(f"host {name}: ladder must list reference accessions, nearest first")
+        for g in genomes:
+            if not g.relative:
+                raise ConfigError(f"host {name}: genome {g.key} needs a relative (automatic choice not available yet)")
+            if g.relative == g.key or g.relative in ladder:
+                raise ConfigError(f"host {name}: genome {g.key}: the relative must differ from the genome and the ladder")
+        if set(ladder) & set(keys):
+            raise ConfigError(f"host {name}: a ladder reference is also one of the host's genomes")
+        hosts.append(HostSpec(name=name, genomes=genomes, ladder=list(ladder), indexes=list(indexes)))
     return Config(
         library_dir=Path(data["library_dir"]),
         index_dir=Path(data["index_dir"]),
@@ -181,6 +197,7 @@ def parse_config(data: dict[str, Any]) -> Config:
         fcs_gx_db=Path(data["fcs_gx_db"]),
         hosts=hosts,
         settings=merge_settings(data.get("settings")),
+        fcs_gx_db_build=str(data["fcs_gx_db_build"]) if data.get("fcs_gx_db_build") else None,
     )
 
 

@@ -1,4 +1,4 @@
-"""Comparing tandem-repeat units (rule R2b, repeat family).
+"""Comparing tandem-repeat units (rule 5, repeat family).
 
 A tandem repeat has no fixed start: the unit ACGTT is the same repeat as GTTAC
 (a rotation) and as its reverse complement. Two units are compared by aligning

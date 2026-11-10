@@ -9,7 +9,9 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "config" / "config.example.yaml"
 
 def minimal(**extra):
     d = {"library_dir": "/lib", "index_dir": "/idx", "work_dir": "/work", "fcs_gx_db": "/db",
-         "hosts": [{"name": "Chlorocebus_spp", "genomes": ["GCF_047675955.1", "GCA_023783515.1"]}]}
+         "hosts": [{"name": "Chlorocebus_spp", "ladder": ["GCA_963574265.1", "GCA_000001405.29"],
+                    "genomes": [{"accession": "GCF_047675955.1", "relative": "GCA_023783515.1"},
+                                {"accession": "GCA_023783515.1", "relative": "GCF_047675955.1"}]}]}
     d.update(extra)
     return d
 
@@ -23,6 +25,7 @@ def test_defaults_applied():
     c = parse_config(minimal())
     assert c.settings == merge_settings({})
     assert c.hosts[0].indexes == ["bowtie2", "minimap2"]
+    assert c.hosts[0].ladder[-1] == "GCA_000001405.29"
 
 
 def test_override_and_hash_changes():
@@ -49,8 +52,9 @@ def test_bad_settings_rejected(settings):
 
 def test_local_fasta_needs_taxid():
     with pytest.raises(ConfigError):
-        parse_config(minimal(hosts=[{"name": "x", "genomes": [{"fasta": "/g.fna"}]}]))
-    c = parse_config(minimal(hosts=[{"name": "x", "genomes": [{"fasta": "/g.fna", "tax_id": 9534}]}]))
+        parse_config(minimal(hosts=[{"name": "x", "ladder": ["L.1"], "genomes": [{"fasta": "/g.fna", "relative": "R.1"}]}]))
+    c = parse_config(minimal(hosts=[{"name": "x", "ladder": ["L.1"],
+                                     "genomes": [{"fasta": "/g.fna", "tax_id": 9534, "relative": "R.1"}]}]))
     assert c.hosts[0].genomes[0].tax_id == 9534
 
 
@@ -60,4 +64,14 @@ def test_missing_and_duplicate():
     with pytest.raises(ConfigError):
         parse_config(d)
     with pytest.raises(ConfigError):
-        parse_config(minimal(hosts=[{"name": "x", "genomes": ["A.1", "A.1"]}]))
+        parse_config(minimal(hosts=[{"name": "x", "ladder": ["L.1"],
+                                     "genomes": [{"accession": "A.1", "relative": "R.1"}] * 2}]))
+
+
+def test_relative_and_ladder_required():
+    with pytest.raises(ConfigError):
+        parse_config(minimal(hosts=[{"name": "x", "ladder": ["L.1"], "genomes": ["A.1"]}]))
+    with pytest.raises(ConfigError):
+        parse_config(minimal(hosts=[{"name": "x", "genomes": [{"accession": "A.1", "relative": "R.1"}]}]))
+    with pytest.raises(ConfigError):
+        parse_config(minimal(hosts=[{"name": "x", "ladder": ["R.1"], "genomes": [{"accession": "A.1", "relative": "R.1"}]}]))

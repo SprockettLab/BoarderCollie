@@ -16,4 +16,4 @@ def test_decisions_file(tmp_path):
     assert "# settings hash: abc123" in comments
     header, row = [l.split("\t") for l in lines if not l.startswith("#")]
     assert tuple(header) == COLUMNS and len(row) == len(COLUMNS)
-    assert row[COLUMNS.index("rule")] == "R3" and row[COLUMNS.index("action")] == "remove"
+    assert row[COLUMNS.index("rule")] == "6" and row[COLUMNS.index("action")] == "remove"
