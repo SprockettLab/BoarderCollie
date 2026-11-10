@@ -98,7 +98,9 @@ def decide_from_files(
             RepeatEvidence(t.cover, t.main_cover, t.main_unit, lineage.get(q, 0), distant.get(q, 0)),
             CompositionEvidence(float(c["cpg_oe"]), float(c["cpg_oe_low"]), float(c["cpg_oe_high"])) if c else None,
         ))
-    controls = [Control(s["id"], "host", alignments(s["id"])) for s in segs if s["type"] == "host_control"]
+    # Host control ids are <region id>_C<n> (extract.py).
+    controls = [Control(s["id"], "host", alignments(s["id"]), s["id"].rsplit("_C", 1)[0])
+                for s in segs if s["type"] == "host_control"]
     controls += [Control(k, "foreign", alignments(k)) for k in foreign]
 
     lookup = lineage_lookup([r.fcs_top_taxid for r in regions if r.fcs_top_taxid], taxonomy_cache, fetch_taxonomy)

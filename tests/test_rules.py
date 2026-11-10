@@ -168,3 +168,56 @@ def test_genome_with_nothing_flagged(settings):
     result = decide([], settings, controls=[Control("bact", "foreign", [ladder(0.0)])])
     assert result.status == "no flagged regions"
     assert result.relative_alignment_test == TEST_NOT_NEEDED and result.decisions == []
+
+
+def short_region(rid, length, **kw):
+    r = region(rid, **kw)
+    r.end = r.start + length - 1
+    return r
+
+
+def test_only_controls_of_tested_regions_count(settings):
+    # 30 failing controls belong to a retrovirus region kept untested; the tested region's 3 controls align.
+    controls = [Control(f"erv_C{i}", "host", [ladder(0.0)], "erv") for i in range(30)]
+    controls += [Control(f"t_C{i}", "host", [ladder(0.95)], "t") for i in range(3)]
+    controls += [Control("bact", "foreign", [ladder(0.0)])]
+    result = decide([region("t", [ladder(0.9)]), region("erv", taxid=39068)], settings, controls=controls)
+    assert result.status == "decided" and result.relative_alignment_test == TEST_APPLIED
+    assert (result.host_controls_passed, result.host_controls_total) == (3, 3)
+    d = by_id(result)
+    assert (d["t"].rule, d["t"].action) == ("3", "keep")
+    assert (d["erv"].rule, d["erv"].action) == ("2", "keep")
+
+
+def test_short_region_gets_fcs_action_and_its_controls_do_not_count(settings):
+    controls = [Control(f"s_C{i}", "host", [ladder(0.0)], "s") for i in range(3)]
+    controls += [Control(f"t_C{i}", "host", [ladder(0.95)], "t") for i in range(3)]
+    controls += [Control("bact", "foreign", [ladder(0.0)])]
+    regions = [region("t", [ladder(0.9)]),
+               short_region("s", 299, alignments=[ladder(0.0)], action="EXCLUDE"),
+               short_region("r", 250, alignments=[ladder(0.0)], action="REVIEW"),
+               short_region("ok", 300, alignments=[ladder(0.0)])]
+    result = decide(regions, settings, controls=controls)
+    assert result.status == "decided" and (result.host_controls_passed, result.host_controls_total) == (3, 3)
+    d = by_id(result)
+    assert (d["s"].rule, d["s"].action) == ("too_short", "remove")
+    assert (d["r"].rule, d["r"].action) == ("too_short", "keep")
+    assert d["s"].relative_alignment_test == "not applied: shorter than 300 bp"
+    assert "too short" in d["s"].note
+    assert (d["ok"].rule, d["ok"].action) == ("6", "remove")  # 300 bp is tested
+
+
+def test_short_length_is_a_setting(settings):
+    s = merge_settings({"min_tested_length": 0})
+    result = decide([short_region("s", 100, alignments=[ladder(0.9)])], s)
+    assert by_id(result)["s"].rule == "3"
+
+
+def test_nothing_long_enough_to_test(settings):
+    from boardercollie.rules import TEST_NONE_TESTABLE
+    result = decide([short_region("s", 200, action="EXCLUDE"), region("erv", taxid=39068)], settings,
+                    controls=[Control("bact", "foreign", [ladder(0.0)])])
+    assert result.status == "decided" and result.relative_alignment_test == TEST_NONE_TESTABLE
+    d = by_id(result)
+    assert (d["s"].rule, d["s"].action) == ("too_short", "remove")
+    assert (d["erv"].rule, d["erv"].action) == ("2", "keep")

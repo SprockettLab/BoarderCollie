@@ -22,9 +22,17 @@ applied in this order, are:
      rule 3 or 4 in the same genome. Kept.
   6  Everything else. Removed.
 
+Regions shorter than min_tested_length are too short for the alignment test
+(whole-genome alignment does not align short sequences reliably: in the first
+test runs, under half of 200-300 bp host controls aligned, against 99-100% of
+longer ones). After rule 2, such a region gets FCS-GX's own action.
+
+Only the host controls of regions that go through the test count in rule 1;
+controls drawn for regions kept by rule 2 or too short do not.
+
 The rule column of decisions.tsv holds the number of the rule that decided
-each region, or "fcs_only" when rule 1 failed and FCS-GX's own action was
-applied.
+each region, "too_short" for a region under min_tested_length, or "fcs_only"
+when rule 1 failed and FCS-GX's own action was applied.
 
 Composition and gene evidence never decide. It is compared with the decision
 and any disagreement is reported in evidence_conflict.
@@ -40,6 +48,7 @@ from .repeats import unit_identity
 TEST_APPLIED = "applied"
 TEST_NOT_APPLIED = "not applied: host controls failed"
 TEST_NOT_NEEDED = "not needed: FCS-GX flagged no regions"
+TEST_NONE_TESTABLE = "not needed: every flagged region kept as a retrovirus or too short for the test"
 FCS_REMOVING_ACTIONS = ("EXCLUDE", "TRIM", "FIX")
 
 
@@ -98,6 +107,7 @@ class Control:
     control_id: str
     kind: str                # "host" (from this genome) or "foreign"
     alignments: list[Alignment] = field(default_factory=list)
+    region_id: str | None = None  # the flagged region a host control was drawn for
 
 
 @dataclass
@@ -194,6 +204,13 @@ def _decision(r: Region, rule: str, conclusion: str, action: str, test: str, set
     return Decision(r, frac, align_class(frac, settings), rule, conclusion, action, test, conflict, reasons, note)
 
 
+def _fcs_decision(r: Region, rule: str, test: str, settings: dict, why: str) -> Decision:
+    """FCS-GX's own action for a region the alignment test does not decide."""
+    if r.fcs_action in FCS_REMOVING_ACTIONS:
+        return _decision(r, rule, "foreign", "remove", test, settings, note=f"{why}: FCS-GX action {r.fcs_action} applied")
+    return _decision(r, rule, "host", "keep", test, settings, note=f"{why}: FCS-GX action {r.fcs_action}, no removal")
+
+
 def decide_genome(
     accession: str,
     regions: list[Region],
@@ -202,10 +219,24 @@ def decide_genome(
     lineage: Callable[[int], set[int]],
 ) -> GenomeResult:
     """Apply rules 1 to 6 to every flagged region of one genome."""
-    passed, h_ok, h_n, f_ok, f_n = control_check(controls, settings)
+    kept_taxon = {r.region_id for r in regions if is_kept_taxon(r.fcs_top_taxid, settings, lineage)}
+    too_short = {r.region_id for r in regions
+                 if r.region_id not in kept_taxon and r.length < settings["min_tested_length"]}
+    tested = {r.region_id for r in regions} - kept_taxon - too_short
+    counted = [c for c in controls if c.kind != "host" or c.region_id is None or c.region_id in tested]
+    passed, h_ok, h_n, f_ok, f_n = control_check(counted, settings)
     if not regions:
         # Nothing flagged: there is nothing to test and no host controls are drawn.
         return GenomeResult(accession, "no flagged regions", TEST_NOT_NEEDED, h_ok, h_n, f_ok, f_n, [])
+    short_label = f"not applied: shorter than {settings['min_tested_length']} bp"
+    if not tested:
+        out = []
+        for r in regions:
+            if r.region_id in kept_taxon:
+                out.append(_decision(r, "2", "host", "keep", TEST_NONE_TESTABLE, settings))
+            else:
+                out.append(_fcs_decision(r, "too_short", short_label, settings, "too short for the alignment test"))
+        return GenomeResult(accession, "decided", TEST_NONE_TESTABLE, h_ok, h_n, f_ok, f_n, out)
 
     if not passed:
         if settings["on_controls_failed"] == "stop":
@@ -225,8 +256,10 @@ def decide_genome(
     decided: dict[str, Decision] = {}
     pending: list[Region] = []
     for r in regions:
-        if is_kept_taxon(r.fcs_top_taxid, settings, lineage):
+        if r.region_id in kept_taxon:
             decided[r.region_id] = _decision(r, "2", "host", "keep", TEST_APPLIED, settings)
+        elif r.region_id in too_short:
+            decided[r.region_id] = _fcs_decision(r, "too_short", short_label, settings, "too short for the alignment test")
         elif _host_by_alignment(r, settings):
             decided[r.region_id] = _decision(r, "3", "host", "keep", TEST_APPLIED, settings)
         elif _host_lineage_repeat(r, settings):

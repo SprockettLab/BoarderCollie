@@ -34,6 +34,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "family_repeat_min": 0.5,
     "family_unit_min_identity": 0.8,
     "family_period_tolerance": 0.1,
+    # Regions shorter than this get FCS-GX's own action: too short to align reliably.
+    "min_tested_length": 300,
     # Controls.
     "controls_per_segment": 3,
     "background_per_segment": 100,
@@ -120,7 +122,7 @@ def merge_settings(overrides: dict[str, Any] | None) -> dict[str, Any]:
         raise ConfigError(f"repeat_lineage_rank must be one of {LINEAGE_RANKS}")
     if settings["on_controls_failed"] not in ON_CONTROLS_FAILED:
         raise ConfigError(f"on_controls_failed must be one of {ON_CONTROLS_FAILED}")
-    for key in ("embedded_flank_bp", "controls_per_segment", "background_per_segment", "seed"):
+    for key in ("embedded_flank_bp", "controls_per_segment", "background_per_segment", "seed", "min_tested_length"):
         if not isinstance(settings[key], int) or settings[key] < 0:
             raise ConfigError(f"{key} must be a non-negative integer")
     if not settings["controls_per_segment"] or not settings["background_per_segment"]:

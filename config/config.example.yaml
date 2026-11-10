@@ -41,6 +41,7 @@ settings:
   family_repeat_min: 0.5           # rule 5: the main repeat must cover this fraction of the region
   family_unit_min_identity: 0.8    # rule 5: unit identity to a confirmed unit
   family_period_tolerance: 0.1     # rule 5: unit lengths may differ by this fraction
+  min_tested_length: 300           # shorter regions get FCS-GX's own action (too short to align reliably)
   controls_per_segment: 3          # host controls per flagged region (alignment)
   background_per_segment: 100      # background windows per flagged region (composition)
   control_pass_min: 0.8            # share of host controls that must be host_like
