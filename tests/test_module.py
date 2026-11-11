@@ -74,3 +74,53 @@ def test_reference_out_config():
                                          {"name": "k", "genomes": ["G.2"], "reference_out": "/x.fna"}]})
     with pytest.raises(ConfigError, match="unknown keys"):
         parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"], "refrence_out": "/x.fna"}]})
+
+
+# Step commands are written out when the plan is made, so a dry run with commands printed (-p)
+# fails on any command naming something only BoarderCollie's own Snakefile defines. Run as a
+# module, those names are not in reach: a command must take them from its params.
+# download_only skips every such step, so these two plans run with the checks on.
+
+def module_plan(tmp_path, bc):
+    (tmp_path / "Snakefile").write_text(PARENT.format(snakefile=REPO / "workflow" / "Snakefile"))
+    genome = tmp_path / "host" / "H.fna"
+    bc = {"library_dir": str(tmp_path / "lib"), "index_dir": str(tmp_path / "idx"),
+          "work_dir": str(tmp_path / "work"), **bc}
+    bc["hosts"][0]["reference_out"] = str(genome)
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({"host_filter": {"genome": str(genome)},
+                                                          "boardercollie": bc}))
+    plan = run(tmp_path, "--dry-run", "--printshellcmds")
+    return plan.returncode, plan.stdout + plan.stderr
+
+
+def test_module_plan_with_every_check(tmp_path):
+    fasta = tmp_path / "host1.fna"
+    fasta.write_text(">c1\nACGTACGTACGGGCCCAAAT\n")
+    gxdb = tmp_path / "gxdb"
+    gxdb.mkdir()
+    (gxdb / "all.meta.jsonl").write_text('{"build-date": "2023-01-24"}\n')
+    # Relative and ladder named, so the plan needs no NCBI lookup.
+    code, out = module_plan(tmp_path, {
+        "fcs_gx_db": str(gxdb),
+        "hosts": [{"name": "H", "genomes": [{"fasta": str(fasta), "tax_id": 60711, "relative": "GCF_000409795.2"}],
+                   "ladder": ["GCF_049350105.2", "GCF_029281585.2"], "indexes": []}]})
+    assert code == 0, out
+    for step in ("screen", "extract", "flagged", "queries", "align", "copies_own", "copies_ref", "trf",
+                 "decide", "clean", "combine", "reference_out_H"):
+        assert f"rule boardercollie_{step}:" in out, step
+    work = tmp_path / "work"
+    assert f"extract --config {work / 'config.used.yaml'} " in out
+    assert f"decide --config {work / 'config.used.yaml'} " in out
+    assert out.count("--settings-hash ") == 2 and "--settings-hash {" not in out
+
+
+def test_module_plan_with_reports_made_earlier(tmp_path):
+    from test_precomputed import genome as small_genome, reports
+    fasta = small_genome(tmp_path, "host1")
+    reports(tmp_path / "reports", key="host1")
+    code, out = module_plan(tmp_path, {
+        "fcs_gx_reports": str(tmp_path / "reports"),
+        "hosts": [{"name": "H", "genomes": [{"fasta": str(fasta), "tax_id": 9541}], "indexes": []}],
+        "settings": {"checks": {"related_genome": False, "lineage_repeat": False, "repeat_family": False}}})
+    assert code == 0, out
+    assert "rule boardercollie_screen_precomputed:" in out and " --build 2023-01-24 " in out

@@ -340,12 +340,14 @@ rule screen_precomputed:
         report=LIB / "genomes" / "{acc}" / "fcs_gx" / "precomputed" / "{phash}" / "fcs_gx_report.txt",
         taxonomy=LIB / "genomes" / "{acc}" / "fcs_gx" / "precomputed" / "{phash}" / "taxonomy.rpt",
         record=LIB / "genomes" / "{acc}" / "fcs_gx" / "precomputed" / "{phash}" / "check.json",
+    params:
+        build=GX,
     resources:
         mem_mb=8000,
     shell:
         logged("screen_precomputed",
         "python -m boardercollie.cli import-fcs-reports --fasta {input.fasta} --record {input.record} "
-        "--action {input.action} --taxonomy {input.taxonomy} --build {GX} "
+        "--action {input.action} --taxonomy {input.taxonomy} --build {params.build} "
         "--out-report {output.report} --out-taxonomy {output.taxonomy} --out-record {output.record}")
 
 
@@ -389,11 +391,13 @@ rule extract:
         tsv=WORK / "{acc}" / "{key}" / "segments.tsv",
         composition=WORK / "{acc}" / "{key}" / "composition.tsv",
         fai=WORK / "{acc}" / "{key}" / "genome.fai",
+    params:
+        config=CONFIGFILE,
     resources:
         mem_mb=8000,
     shell:
         logged("extract",
-        "python -m boardercollie.cli extract --config {CONFIGFILE} --genome {input.fasta} --report {input.report} "
+        "python -m boardercollie.cli extract --config {params.config} --genome {input.fasta} --report {input.report} "
         "--taxonomy {input.taxonomy} --fai {output.fai} --out-fasta {output.fasta} --out-tsv {output.tsv} "
         "--out-composition {output.composition}")
 
@@ -552,13 +556,15 @@ rule decide:
         taxonomy=LIB / "genomes" / "{acc}" / "runs" / "{key}" / "taxonomy_cache.json",
     params:
         args=decide_args,
+        config=CONFIGFILE,
+        settings_hash=SETTINGS_HASH,
     shell:
         logged("decide",
-        "python -m boardercollie.cli decide --config {CONFIGFILE} --accession {wildcards.acc} "
+        "python -m boardercollie.cli decide --config {params.config} --accession {wildcards.acc} "
         "--segments {input.segments} --segments-fasta {input.fasta} --composition {input.composition} "
         "--foreign {input.foreign} --own-record {input.record} "
         "--taxonomy-cache {output.taxonomy} --out-decisions {output.decisions} "
-        "--out-removals {output.removals} --out-lineage {output.lineage} --settings-hash {SETTINGS_HASH} {params.args}")
+        "--out-removals {output.removals} --out-lineage {output.lineage} --settings-hash {params.settings_hash} {params.args}")
 
 
 rule clean:
@@ -577,6 +583,7 @@ rule clean:
     params:
         gxlog=lambda w: LIB / "genomes" / w.acc / "runs" / w.key / "gx_clean_genome.log",
         fai=lambda w: WORK / w.acc / w.key / "genome.fai",
+        settings_hash=SETTINGS_HASH,
     resources:
         mem_mb=32000,
     shell:
@@ -595,7 +602,7 @@ rule clean:
         # The removed FASTA is cut from the original by BoarderCollie, so it holds every removed region.
         python -m boardercollie.cli check-clean --accession {wildcards.acc} --original {input.fasta} \
           --clean {output.clean} --removed {output.removed} --removals {input.removals} --fai {params.fai} $gxlog \
-          --decisions {input.decisions} --run-key {wildcards.key} --settings-hash {SETTINGS_HASH} --out {output.record}
+          --decisions {input.decisions} --run-key {wildcards.key} --settings-hash {params.settings_hash} --out {output.record}
         """)
 
 
