@@ -23,13 +23,16 @@ from pathlib import Path
 
 import yaml
 
-# The repository this Snakefile belongs to. When another workflow (MAGmaker) loads
-# this one as a Snakemake module, the boardercollie package is taken from here, both
-# when the workflow is read and in every step (through PYTHONPATH), so it need not be
-# installed in the calling workflow's environments.
+# The repository this Snakefile belongs to. The boardercollie package is taken from
+# here, both when the workflow is read and in every step, so it need not be installed
+# in any conda environment (including a calling workflow's, e.g. MAGmaker's).
+# Steps cannot rely on PYTHONPATH set here: with --use-conda, Snakemake runs each step
+# with PYTHONPATH removed. BOARDERCOLLIE_REPO is passed through untouched, and logged()
+# puts it on PYTHONPATH at the start of every step.
 REPO = Path(workflow.current_basedir).parent.resolve()
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
+os.environ["BOARDERCOLLIE_REPO"] = str(REPO)
 os.environ["PYTHONPATH"] = os.pathsep.join([str(REPO)] + [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep)
                                                            if p and p != str(REPO)])
 
@@ -85,10 +88,14 @@ def logged(step, cmd):
     The run id is read from the environment when the step runs, never written into the
     command: Snakemake reruns a finished step whose command text has changed, so a run id
     in the text would make every new run redo every step, FCS-GX screens included.
+    The package's folder comes the same way, from BOARDERCOLLIE_REPO (see REPO above),
+    so the command text does not depend on where BoarderCollie is cloned.
     """
     row = (r"""printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" """
            + f'"${{{{BOARDERCOLLIE_RUN_ID:-unknown}}}}" "$1" "{step}" "{{wildcards}}" "$2" "$3" >> "{RUN_LOG}"')
-    return (f"_bclog() {{{{ {row}; }}}}\n_bclog start '' ''\nset +e\n( set -e\n{cmd}\n)\n"
+    path = ('export PYTHONPATH="${{BOARDERCOLLIE_REPO:?BOARDERCOLLIE_REPO is not set}}'
+            '${{PYTHONPATH:+:$PYTHONPATH}}"\n')
+    return (path + f"_bclog() {{{{ {row}; }}}}\n_bclog start '' ''\nset +e\n( set -e\n{cmd}\n)\n"
             "_bcs=$?\nset -e\n_bclog finish \"$_bcs\" \"{output}\"\nexit $_bcs")
 
 

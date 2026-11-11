@@ -124,3 +124,24 @@ def test_module_plan_with_reports_made_earlier(tmp_path):
         "settings": {"checks": {"related_genome": False, "lineage_repeat": False, "repeat_family": False}}})
     assert code == 0, out
     assert "rule boardercollie_screen_precomputed:" in out and " --build 2023-01-24 " in out
+
+
+def test_steps_find_the_package_without_pythonpath(tmp_path):
+    # With --use-conda, Snakemake runs every step with PYTHONPATH removed, so a step's
+    # "python -m boardercollie.cli" found no package (ModuleNotFoundError on demon). The
+    # caller here removes PYTHONPATH before each step the same way; the steps must still run.
+    fasta = tmp_path / "host1.fna"
+    fasta.write_text(">c1\nACGTACGTAC\n>c2\nGGGCCCAAAT\n")
+    (tmp_path / "Snakefile").write_text('shell.prefix("set -euo pipefail; unset PYTHONPATH; ")\n'
+                                        + PARENT.format(snakefile=REPO / "workflow" / "Snakefile"))
+    genome = tmp_path / "host" / "H.fna"
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({
+        "host_filter": {"genome": str(genome)},
+        "boardercollie": {
+            "library_dir": str(tmp_path / "lib"), "index_dir": str(tmp_path / "idx"), "work_dir": str(tmp_path / "work"),
+            "hosts": [{"name": "H", "genomes": [{"fasta": str(fasta), "tax_id": 9606}], "indexes": [],
+                       "reference_out": str(genome)}],
+            "settings": {"download_only": True}}}))
+    done = run(tmp_path)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert genome.read_text() == fasta.read_text()
