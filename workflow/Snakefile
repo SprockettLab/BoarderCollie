@@ -715,8 +715,13 @@ rule report:
 rule bowtie2:
     conda:
         "envs/boardercollie.yaml"
+    # ancient: a caller's reference_out is a hard link of this FASTA, and Snakemake
+    # touches every output after a job, so each caller run bumps this file's mtime.
+    # The index belongs to the host key (genomes and settings), not to that mtime;
+    # without ancient every later caller would rebuild the shared index. A rerun of
+    # combine itself still reruns this step.
     input:
-        rules.combine.output.fasta,
+        ancient(rules.combine.output.fasta),
     output:
         IDX / "bt2" / "{host}" / "{hkey}" / "index_done.txt",
     threads: 32
@@ -735,8 +740,13 @@ rule bowtie2:
 rule minimap2_index:
     conda:
         "envs/boardercollie.yaml"
+    # ancient: a caller's reference_out is a hard link of this FASTA, and Snakemake
+    # touches every output after a job, so each caller run bumps this file's mtime.
+    # The index belongs to the host key (genomes and settings), not to that mtime;
+    # without ancient every later caller would rebuild the shared index. A rerun of
+    # combine itself still reruns this step.
     input:
-        rules.combine.output.fasta,
+        ancient(rules.combine.output.fasta),
     output:
         IDX / "minimap2" / "{host}" / "{hkey}" / "{host}.map-ont.mmi",
     threads: 16
