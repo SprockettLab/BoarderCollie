@@ -24,7 +24,14 @@ def test_example_config_loads():
 def test_defaults_applied():
     c = parse_config(minimal())
     assert c.settings == merge_settings({})
-    assert c.hosts[0].indexes == ["bowtie2", "minimap2"]
+    assert c.hosts[0].indexes == []   # each index is off unless listed
+    on = minimal()
+    on["hosts"][0]["indexes"] = ["minimap2"]
+    assert parse_config(on).hosts[0].indexes == ["minimap2"]
+    bad = minimal()
+    bad["hosts"][0]["indexes"] = "bowtie2"
+    with pytest.raises(ConfigError, match="indexes must be from"):
+        parse_config(bad)
     assert c.hosts[0].ladder[-1] == "GCA_000001405.29"
 
 
