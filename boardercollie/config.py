@@ -119,6 +119,13 @@ class HostSpec:
     # across file systems), for a workflow that needs the path before the run, such
     # as MAGmaker's host_filter genome.
     reference_out: str | None = None
+    # Fixed paths the host's shared indexes are also reachable at, for a calling
+    # workflow that names them before the run (MAGmaker's host_filter): bowtie2_out is
+    # an index stem (<stem>.1.bt2l ... and <stem>.index_done.txt), minimap2_out an .mmi
+    # path. Each is a hard link (or a copy across file systems) of the index in
+    # index_dir, which is built once per host key and reused by every caller.
+    bowtie2_out: str | None = None
+    minimap2_out: str | None = None
 
 
 @dataclass
@@ -290,17 +297,23 @@ def parse_config(data: dict[str, Any]) -> Config:
                 raise ConfigError(f"host {name}: genome {g.key}: the relative must differ from the genome and the ladder")
         if set(ladder) & set(keys):
             raise ConfigError(f"host {name}: a ladder reference is also one of the host's genomes")
-        unknown = set(h) - {"name", "genomes", "ladder", "indexes", "reference_out"}
+        unknown = set(h) - {"name", "genomes", "ladder", "indexes", "reference_out", "bowtie2_out", "minimap2_out"}
         if unknown:
             raise ConfigError(f"host {name}: unknown keys {sorted(unknown)}")
-        out = h.get("reference_out")
-        if out is not None and (not isinstance(out, str) or not out.strip()):
-            raise ConfigError(f"host {name}: reference_out must be a file path")
-        if out and out in outs:
-            raise ConfigError(f"host {name}: reference_out {out} is also another host's")
-        outs.add(out)
-        hosts.append(HostSpec(name=name, genomes=genomes, ladder=list(ladder), indexes=list(indexes),
-                              reference_out=out or None))
+        paths = {}
+        for k in ("reference_out", "bowtie2_out", "minimap2_out"):
+            out = h.get(k)
+            if out is not None and (not isinstance(out, str) or not out.strip()):
+                raise ConfigError(f"host {name}: {k} must be a file path")
+            if out and out in outs:
+                raise ConfigError(f"host {name}: {k} {out} is also used by another host or output")
+            if out:
+                outs.add(out)
+            paths[k] = out or None
+        for k, kind in (("bowtie2_out", "bowtie2"), ("minimap2_out", "minimap2")):
+            if paths[k] and kind not in indexes:
+                raise ConfigError(f"host {name}: {k} needs {kind} in indexes")
+        hosts.append(HostSpec(name=name, genomes=genomes, ladder=list(ladder), indexes=list(indexes), **paths))
     return Config(
         library_dir=Path(data["library_dir"]),
         index_dir=Path(data["index_dir"]),

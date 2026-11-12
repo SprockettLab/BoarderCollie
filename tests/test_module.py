@@ -76,6 +76,72 @@ def test_reference_out_config():
         parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"], "refrence_out": "/x.fna"}]})
 
 
+def test_index_out_config():
+    base = {"library_dir": "/l", "index_dir": "/i", "work_dir": "/w", "fcs_gx_db": "/db"}
+    c = parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"], "bowtie2_out": "/x/h",
+                                         "minimap2_out": "/x/h.mmi"}]})
+    assert (c.hosts[0].bowtie2_out, c.hosts[0].minimap2_out) == ("/x/h", "/x/h.mmi")
+    assert parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"]}]}).hosts[0].bowtie2_out is None
+    with pytest.raises(ConfigError, match="needs bowtie2 in indexes"):
+        parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"], "indexes": ["minimap2"],
+                                         "bowtie2_out": "/x/h"}]})
+    with pytest.raises(ConfigError, match="needs minimap2 in indexes"):
+        parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"], "indexes": [],
+                                         "minimap2_out": "/x/h.mmi"}]})
+    with pytest.raises(ConfigError, match="another host or output"):
+        parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"], "reference_out": "/x/h",
+                                         "bowtie2_out": "/x/h"}]})
+
+
+INDEX_PARENT = """
+module boardercollie:
+    snakefile: "{snakefile}"
+    config: config["boardercollie"]
+
+use rule * from boardercollie as boardercollie_*
+
+rule all:
+    default_target: True
+    input: config["want"]
+"""
+
+
+def test_index_out_built_once_and_shared(tmp_path):
+    # Two calling workflows in separate folders, same host: the indexes are built once in
+    # index_dir; each folder gets hard links at its own fixed paths. The second builds nothing.
+    fasta = tmp_path / "host1.fna"
+    fasta.write_text(">c1\n" + "ACGTTGCAAGGCTTAACCGGTATCGATCGGCTAGCTAGGATCCA" * 30 + "\n")
+    shared = {"library_dir": str(tmp_path / "lib"), "index_dir": str(tmp_path / "idx"),
+              "work_dir": str(tmp_path / "work")}
+    outs = []
+    for run_dir in ("runA", "runB"):
+        d = tmp_path / run_dir
+        d.mkdir()
+        (d / "Snakefile").write_text(INDEX_PARENT.format(snakefile=REPO / "workflow" / "Snakefile"))
+        stem, mmi = d / "out" / "H", d / "out" / "H.map-ont.mmi"
+        (d / "config.yaml").write_text(yaml.safe_dump({
+            "want": [str(d / "out" / "H.fna"), str(stem) + ".index_done.txt", str(mmi)],
+            "boardercollie": {**shared, "hosts": [{
+                "name": "H", "genomes": [{"fasta": str(fasta), "tax_id": 9606}],
+                "indexes": ["bowtie2", "minimap2"], "reference_out": str(d / "out" / "H.fna"),
+                "bowtie2_out": str(stem), "minimap2_out": str(mmi)}],
+                "settings": {"download_only": True}}}))
+        done = run(d)
+        assert done.returncode == 0, done.stdout + done.stderr
+        outs.append(done.stdout + done.stderr)
+        built = sorted((tmp_path / "idx" / "bt2" / "H").glob("*/H.1.bt2l"))
+        assert len(built) == 1, built
+        for p in ("1", "2", "3", "4", "rev.1", "rev.2"):
+            link = Path(f"{stem}.{p}.bt2l")
+            assert link.stat().st_ino == (built[0].parent / f"H.{p}.bt2l").stat().st_ino, p
+        assert mmi.stat().st_ino == next((tmp_path / "idx" / "minimap2" / "H").glob("*/H.map-ont.mmi")).stat().st_ino
+        assert Path(f"{stem}.index_done.txt").read_text().startswith("shared_index\t")
+    assert "rule boardercollie_bowtie2:" in outs[0] and "rule boardercollie_minimap2_index:" in outs[0]
+    assert "rule boardercollie_bowtie2:" not in outs[1], "second workflow rebuilt the bowtie2 index"
+    assert "rule boardercollie_minimap2_index:" not in outs[1], "second workflow rebuilt the minimap2 index"
+    assert "rule boardercollie_bowtie2_out_H:" in outs[1] and "rule boardercollie_minimap2_out_H:" in outs[1]
+
+
 # Step commands are written out when the plan is made, so a dry run with commands printed (-p)
 # fails on any command naming something only BoarderCollie's own Snakefile defines. Run as a
 # module, those names are not in reach: a command must take them from its params.
