@@ -114,7 +114,9 @@ class HostSpec:
     name: str
     genomes: list[GenomeSpec]
     ladder: list[str]
-    indexes: list[str] = field(default_factory=lambda: list(INDEX_TYPES))
+    # Read-alignment indexes to build (bowtie2, minimap2); none unless listed, since
+    # not every caller needs them and each is hours of work for a mammalian host.
+    indexes: list[str] = field(default_factory=list)
     # A fixed path the joined host reference is also written to (hard link, or copy
     # across file systems), for a workflow that needs the path before the run, such
     # as MAGmaker's host_filter genome.
@@ -280,8 +282,8 @@ def parse_config(data: dict[str, Any]) -> Config:
         keys = [g.key for g in genomes]
         if len(set(keys)) != len(keys):
             raise ConfigError(f"host {name}: a genome is listed twice")
-        indexes = h.get("indexes", list(INDEX_TYPES))
-        if not set(indexes) <= set(INDEX_TYPES):
+        indexes = h.get("indexes") or []
+        if not isinstance(indexes, list) or not set(indexes) <= set(INDEX_TYPES):
             raise ConfigError(f"host {name}: indexes must be from {INDEX_TYPES}")
         # A blank, none, NA or auto relative or ladder is chosen automatically
         # from the NCBI taxonomy when the workflow starts (boardercollie.references).

@@ -7,7 +7,8 @@
 # copies, decide (boardercollie.rules), clean with gx clean-genome, check.
 # settings: download_only skips everything after fetch; with the alignment
 # checks (rules 3 to 5) all off, the alignment and repeat steps are skipped.
-# Per host: join the cleaned genomes, build bowtie2 and minimap2 indexes.
+# Per host: join the cleaned genomes; build the bowtie2 and minimap2 indexes listed in
+# the host's indexes (none by default).
 # Every reference genome (relatives and ladder) is fetched and screened too,
 # and is used only as a copy without every sequence FCS-GX reported in it.
 

@@ -78,8 +78,10 @@ def test_reference_out_config():
 
 def test_index_out_config():
     base = {"library_dir": "/l", "index_dir": "/i", "work_dir": "/w", "fcs_gx_db": "/db"}
-    c = parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"], "bowtie2_out": "/x/h",
-                                         "minimap2_out": "/x/h.mmi"}]})
+    c = parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"], "indexes": ["bowtie2", "minimap2"],
+                                         "bowtie2_out": "/x/h", "minimap2_out": "/x/h.mmi"}]})
+    with pytest.raises(ConfigError, match="needs bowtie2 in indexes"):   # indexes are off by default
+        parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"], "bowtie2_out": "/x/h"}]})
     assert (c.hosts[0].bowtie2_out, c.hosts[0].minimap2_out) == ("/x/h", "/x/h.mmi")
     assert parse_config({**base, "hosts": [{"name": "h", "genomes": ["G.1"]}]}).hosts[0].bowtie2_out is None
     with pytest.raises(ConfigError, match="needs bowtie2 in indexes"):

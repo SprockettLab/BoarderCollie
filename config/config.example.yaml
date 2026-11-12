@@ -30,7 +30,7 @@ hosts:
       - {accession: GCA_023783515.1, relative: GCF_047675955.1}  # relative named
       - GCA_963575115.1
     ladder: auto                     # or a list, e.g. [GCA_963574265.1, GCA_000001405.29]
-    indexes: [bowtie2, minimap2]
+    indexes: [bowtie2, minimap2]     # optional, each off unless listed: [bowtie2], [minimap2], both, or []
     # reference_out: /path/to/Chlorocebus_spp.fna   # optional: the joined reference also written here
     # bowtie2_out: /path/to/Chlorocebus_spp         # optional: the shared bowtie2 index linked to this stem
     # minimap2_out: /path/to/Chlorocebus_spp.mmi    # optional: the shared minimap2 index linked here

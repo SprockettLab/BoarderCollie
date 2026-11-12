@@ -22,7 +22,7 @@ Status: in development; not yet ready for use.
    5. Tandem repeats whose repeat unit matches one kept by rule 3 or 4 are kept.
    6. Everything else is removed.
 4. **Clean** each genome with FCS-GX's own cleaning tool, applying only the removals.
-5. **Combine** the cleaned genomes of a host into one reference and build bowtie2 and minimap2 indexes.
+5. **Combine** the cleaned genomes of a host into one reference and, for each index type listed in the host's `indexes` (none by default), build a bowtie2 or minimap2 index.
 
 Every region, test result, rule and threshold is recorded, and the records can be written out as supplementary tables.
 
