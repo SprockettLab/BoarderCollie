@@ -226,7 +226,11 @@ def host_key(h):
     # The genomes are named in the key: a run key leaves out the genome (its folder
     # names it), so two hosts with different genomes and the same settings would
     # otherwise share a key, and a changed genome list would overwrite the old reference.
-    return hashlib.sha256(json.dumps([[g.key, run_key(g.key)] for g in h.genomes]).encode()).hexdigest()[:12]
+    # A genome's mitochondrion is named too, only when it has one, so the key of a
+    # host without one is what it was before mitochondria could be added.
+    return hashlib.sha256(json.dumps([[g.key, run_key(g.key)] + (["mitochondrion", g.mitochondrion]
+                                                                  if g.mitochondrion else [])
+                                      for g in h.genomes]).encode()).hexdigest()[:12]
 
 
 def G(acc):
@@ -242,6 +246,26 @@ def member_files(acc):
     if DOWNLOAD_ONLY:
         return G(acc) / "original" / f"{acc}.fna", G(acc) / "original" / "record.json"
     return RUN(acc) / f"{acc}_clean.fna", RUN(acc) / "run.json"
+
+
+def mitochondrion_files(acc):
+    """A genome's mitochondrion (config key "mitochondrion") and its record."""
+    m = GENOMES[acc]["spec"].mitochondrion
+    d = G(acc) / "mitochondrion" / m
+    return d / f"{m}.fna", d / "record.json"
+
+
+def host_members(h):
+    """(accession, FASTA, record, member_of) of everything joined into a host reference, in
+    order: each genome, then its mitochondrion when it names one."""
+    out = []
+    for g in h.genomes:
+        fasta, record = member_files(g.key)
+        out.append((g.key, fasta, record, "-"))
+        if g.mitochondrion:
+            mf, mr = mitochondrion_files(g.key)
+            out.append((g.mitochondrion, mf, mr, g.key))
+    return out
 
 
 def W(acc):
@@ -268,6 +292,7 @@ for h in CFG.hosts:
 
 wildcard_constraints:
     acc="[^/]+",
+    macc=r"[A-Z]{1,4}_?[0-9]{5,10}\.[0-9]+",
     ref=r"GC[AF]_[0-9]+\.[0-9]+",
     host="[^/]+",
     phash="[0-9a-f]{12}",
@@ -301,6 +326,22 @@ rule fetch:
     shell:
         logged("fetch",
         "python -m boardercollie.cli fetch {params.src} --out-fasta {output.fasta} --out-record {output.record}")
+
+
+rule fetch_mitochondrion:
+    # The genome's own species' mitochondrial genome from NCBI Nucleotide, checked
+    # (boardercollie.mitochondrion) and added to the host reference after the genome.
+    conda:
+        "envs/boardercollie.yaml"
+    input:
+        genome_record=LIB / "genomes" / "{acc}" / "original" / "record.json",
+    output:
+        fasta=LIB / "genomes" / "{acc}" / "mitochondrion" / "{macc}" / "{macc}.fna",
+        record=LIB / "genomes" / "{acc}" / "mitochondrion" / "{macc}" / "record.json",
+    shell:
+        logged("fetch_mitochondrion",
+        "python -m boardercollie.cli fetch-mitochondrion --accession {wildcards.macc} --genome {wildcards.acc} "
+        "--genome-record {input.genome_record} --out-fasta {output.fasta} --out-record {output.record}")
 
 
 rule screen:
@@ -617,17 +658,19 @@ rule combine:
     conda:
         "envs/boardercollie.yaml"
     input:
-        clean=lambda w: [member_files(g.key)[0] for g in HOSTS[w.host].genomes],
-        records=lambda w: [member_files(g.key)[1] for g in HOSTS[w.host].genomes],
+        clean=lambda w: [m[1] for m in host_members(HOSTS[w.host])],
+        records=lambda w: [m[2] for m in host_members(HOSTS[w.host])],
     output:
         fasta=LIB / "hosts" / "{host}" / "{hkey}" / "{host}.fna",
         members=LIB / "hosts" / "{host}" / "{hkey}" / "members.tsv",
     params:
-        accs=lambda w: " ".join(g.key for g in HOSTS[w.host].genomes),
+        accs=lambda w: " ".join(m[0] for m in host_members(HOSTS[w.host])),
+        member_of=lambda w: " ".join(m[3] for m in host_members(HOSTS[w.host])),
     shell:
         logged("combine",
         "python -m boardercollie.cli combine --accessions {params.accs} --fastas {input.clean} "
-        "--records {input.records} --out {output.fasta} --members-out {output.members}")
+        "--records {input.records} --member-of {params.member_of} --out {output.fasta} "
+        "--members-out {output.members}")
 
 
 def report_spec(acc):

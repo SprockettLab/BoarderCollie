@@ -34,6 +34,8 @@ Each genome's closest relative and the host's comparison genomes (reference ladd
 Each choice is saved in the library with every candidate considered, and reused on later runs while the genomes and settings are unchanged.
 Every threshold is a setting with a default.
 
+**Mitochondria.** Most nuclear assemblies are deposited without their mitochondrion; labs submit it as a separate NCBI Nucleotide record, or not at all. NCBI's RefSeq copies (GCF_) carry the species' RefSeq mitochondrial genome (an NC_ record) added after assembly. A genome entry can name that record, `{accession: GCA_059577405.1, mitochondrion: NC_064185.1}`, and it is added to the host reference right after the genome. Before anything is written, BoarderCollie checks that the record is a complete mitochondrial genome of the length NCBI states, that it is from the genome's own species, and that the assembly does not already hold a mitochondrion; any failure stops the run. The record is listed in `members.tsv` with the genome it belongs to (`member_of`), and its checks are saved beside it. It is not screened with FCS-GX: it is one curated 15-18 kb sequence of the host's own species.
+
 ## Running
 
 ```
