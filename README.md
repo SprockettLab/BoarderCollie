@@ -67,6 +67,8 @@ Outputs, under `library_dir`:
 and under `index_dir`: `bt2/<name>/<host key>/` and `minimap2/<name>/<host key>/`.
 
 A host with `reference_out: <path>` in the config also gets its joined reference at that fixed path (a hard link, or a copy on another file system), with `<path>.members.tsv` beside it.
+Likewise `bowtie2_out: <stem>` links the host's bowtie2 index to `<stem>.1.bt2l` ... `<stem>.rev.2.bt2l` with `<stem>.index_done.txt`, and `minimap2_out: <path>` links its minimap2 index to `<path>` (each needs that index type in `indexes`).
+The indexes themselves are built once per host key under `index_dir`; every workflow that asks for the same host links to them instead of building its own.
 
 ## Use from another Snakemake workflow
 
@@ -82,6 +84,7 @@ use rule * from boardercollie as boardercollie_*
 
 The `boardercollie` section of the calling workflow's config is a BoarderCollie config.
 Give each host `reference_out` set to the path the calling workflow reads, for example MAGmaker's `host_filter: genome`; asking for that file runs everything needed to make it.
+Set `bowtie2_out` and `minimap2_out` the same way to read the shared indexes at fixed paths; the first caller builds them, later callers only link.
 Point `snakefile` at a local clone of this repository: the workflow takes the `boardercollie` package and `resources/` from that clone, so the package need not be installed in the calling workflow's environment.
 Every step names `workflow/envs/boardercollie.yaml`, used when the calling workflow runs with `--use-conda`.
 Snakemake records how each file was made in the `.snakemake` folder of the directory it runs from; a library made in one directory without `--use-conda` and later run from the same directory with it would be remade once, so keep one way of running per working directory.

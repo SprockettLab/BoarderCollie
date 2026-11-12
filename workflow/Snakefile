@@ -289,6 +289,10 @@ for h in CFG.hosts:
         TARGETS.append(IDX / "minimap2" / h.name / hk / f"{h.name}.map-ont.mmi")
     if h.reference_out:
         TARGETS.append(h.reference_out)
+    if h.bowtie2_out:
+        TARGETS.append(h.bowtie2_out + ".index_done.txt")
+    if h.minimap2_out:
+        TARGETS.append(h.minimap2_out)
 
 wildcard_constraints:
     acc="[^/]+",
@@ -767,3 +771,48 @@ for _h in CFG.hosts:
             logged("reference_out",
             "ln -f {input.fasta} {output.fasta} 2>/dev/null || cp {input.fasta} {output.fasta}\n"
             "cp {input.members} {output.members}")
+
+
+# Hosts with bowtie2_out / minimap2_out: the host's indexes, built once per host key in
+# index_dir and shared by every caller, are also linked to fixed paths the calling
+# workflow names before the run (a hard link, or a copy on another file system). A
+# second workflow with the same host reuses the shared index instead of building its own.
+for _h in CFG.hosts:
+    _safe = re.sub(r"[^A-Za-z0-9_]", "_", _h.name)
+    if _h.bowtie2_out:
+
+        rule:
+            name:
+                "bowtie2_out_" + _safe
+            input:
+                IDX / "bt2" / _h.name / host_key(_h) / "index_done.txt",
+            output:
+                _h.bowtie2_out + ".index_done.txt",
+            params:
+                src=str(IDX / "bt2" / _h.name / host_key(_h) / _h.name),
+                dst=_h.bowtie2_out,
+            conda:
+                "envs/boardercollie.yaml"
+            shell:
+                logged("bowtie2_out",
+                r"""
+                for p in 1 2 3 4 rev.1 rev.2; do
+                  ln -f {params.src}.$p.bt2l {params.dst}.$p.bt2l 2>/dev/null || cp {params.src}.$p.bt2l {params.dst}.$p.bt2l
+                done
+                {{ printf 'shared_index\t%s\n' {params.src}; cat {input}; }} > {output}
+                """)
+
+    if _h.minimap2_out:
+
+        rule:
+            name:
+                "minimap2_out_" + _safe
+            input:
+                IDX / "minimap2" / _h.name / host_key(_h) / f"{_h.name}.map-ont.mmi",
+            output:
+                _h.minimap2_out,
+            conda:
+                "envs/boardercollie.yaml"
+            shell:
+                logged("minimap2_out",
+                "ln -f {input} {output} 2>/dev/null || cp {input} {output}")
