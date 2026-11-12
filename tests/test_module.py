@@ -114,7 +114,7 @@ def test_index_out_built_once_and_shared(tmp_path):
     shared = {"library_dir": str(tmp_path / "lib"), "index_dir": str(tmp_path / "idx"),
               "work_dir": str(tmp_path / "work")}
     outs = []
-    for run_dir in ("runA", "runB"):
+    for run_dir in ("runA", "runB", "runC"):
         d = tmp_path / run_dir
         d.mkdir()
         (d / "Snakefile").write_text(INDEX_PARENT.format(snakefile=REPO / "workflow" / "Snakefile"))
@@ -137,9 +137,15 @@ def test_index_out_built_once_and_shared(tmp_path):
         assert mmi.stat().st_ino == next((tmp_path / "idx" / "minimap2" / "H").glob("*/H.map-ont.mmi")).stat().st_ino
         assert Path(f"{stem}.index_done.txt").read_text().startswith("shared_index\t")
     assert "rule boardercollie_bowtie2:" in outs[0] and "rule boardercollie_minimap2_index:" in outs[0]
-    assert "rule boardercollie_bowtie2:" not in outs[1], "second workflow rebuilt the bowtie2 index"
-    assert "rule boardercollie_minimap2_index:" not in outs[1], "second workflow rebuilt the minimap2 index"
-    assert "rule boardercollie_bowtie2_out_H:" in outs[1] and "rule boardercollie_minimap2_out_H:" in outs[1]
+    # Each caller's reference_out (a hard link of the library FASTA) is touched by Snakemake
+    # after its job, which bumps the library file's mtime; later callers must still reuse.
+    for i, name in ((1, "second"), (2, "third")):
+        assert "rule boardercollie_bowtie2:" not in outs[i], f"{name} workflow rebuilt the bowtie2 index"
+        assert "rule boardercollie_minimap2_index:" not in outs[i], f"{name} workflow rebuilt the minimap2 index"
+        assert "rule boardercollie_bowtie2_out_H:" in outs[i] and "rule boardercollie_minimap2_out_H:" in outs[i]
+    # And the first caller, re-planned after the others ran, has nothing to do.
+    again = run(tmp_path / "runA", "--dry-run")
+    assert again.returncode == 0 and "Nothing to be done" in again.stdout + again.stderr, again.stdout + again.stderr
 
 
 # Step commands are written out when the plan is made, so a dry run with commands printed (-p)
