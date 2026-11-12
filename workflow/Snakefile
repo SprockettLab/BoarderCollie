@@ -769,7 +769,12 @@ for _h in CFG.hosts:
         name:
             "reference_out_" + re.sub(r"[^A-Za-z0-9_]", "_", _h.name)
         input:
-            fasta=LIB / "hosts" / _h.name / host_key(_h) / f"{_h.name}.fna",
+            # ancient: the output is a hard link of this file, and Snakemake touches
+            # outputs after a job, so every other caller's reference_out moves this
+            # file's mtime past this caller's members.tsv copy. Without ancient that
+            # reran this step in every earlier caller, and with it everything the
+            # caller built from the reference (MAGmaker: host filtering of every sample).
+            fasta=ancient(LIB / "hosts" / _h.name / host_key(_h) / f"{_h.name}.fna"),
             members=LIB / "hosts" / _h.name / host_key(_h) / "members.tsv",
             report=LIB / "hosts" / _h.name / host_key(_h) / "contamination_report.tsv",
         output:

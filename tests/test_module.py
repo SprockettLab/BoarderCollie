@@ -126,7 +126,9 @@ def test_index_out_built_once_and_shared(tmp_path):
                 "indexes": ["bowtie2", "minimap2"], "reference_out": str(d / "out" / "H.fna"),
                 "bowtie2_out": str(stem), "minimap2_out": str(mmi)}],
                 "settings": {"download_only": True}}}))
-        done = run(d)
+        # No checksums: Snakemake skips the mtime check for files under 1 MB whose
+        # checksum is unchanged, which a real host reference (gigabytes) never gets.
+        done = run(d, "--max-checksum-file-size", "0")
         assert done.returncode == 0, done.stdout + done.stderr
         outs.append(done.stdout + done.stderr)
         built = sorted((tmp_path / "idx" / "bt2" / "H").glob("*/H.1.bt2l"))
@@ -144,7 +146,7 @@ def test_index_out_built_once_and_shared(tmp_path):
         assert "rule boardercollie_minimap2_index:" not in outs[i], f"{name} workflow rebuilt the minimap2 index"
         assert "rule boardercollie_bowtie2_out_H:" in outs[i] and "rule boardercollie_minimap2_out_H:" in outs[i]
     # And the first caller, re-planned after the others ran, has nothing to do.
-    again = run(tmp_path / "runA", "--dry-run")
+    again = run(tmp_path / "runA", "--dry-run", "--max-checksum-file-size", "0")
     assert again.returncode == 0 and "Nothing to be done" in again.stdout + again.stderr, again.stdout + again.stderr
 
 
