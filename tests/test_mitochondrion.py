@@ -158,3 +158,27 @@ def test_host_key_changes_only_with_a_mitochondrion(tmp_path):
     # A host key names genomes and settings, not folders, so plans from different folders compare.
     assert host_key_of(without) == host_key_of(again)
     assert host_key_of(with_mt) != host_key_of(without)
+
+
+def test_assembly_shared_by_two_hosts_only_one_with_a_mitochondrion(tmp_path):
+    # One assembly can serve two hosts (a species with none of its own borrows a sister
+    # species'); only the host that names a mitochondrion gets it.
+    pytest.importorskip("snakemake")
+    fasta = tmp_path / "host1.fna"
+    fasta.write_text(">c1\nACGTACGTAC\n")
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(yaml.safe_dump({
+        "library_dir": str(tmp_path / "lib"), "index_dir": str(tmp_path / "idx"), "work_dir": str(tmp_path / "work"),
+        "hosts": [{"name": "A", "genomes": [{"fasta": str(fasta), "tax_id": 9502, "mitochondrion": "NC_064185.1"}],
+                   "indexes": []},
+                  {"name": "B", "genomes": [{"fasta": str(fasta), "tax_id": 9502}], "indexes": []}],
+        "settings": {"download_only": True}}))
+    env = {**os.environ, "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ.get("PATH", "")}
+    p = subprocess.run([sys.executable, "-m", "snakemake", "-s", str(REPO / "workflow" / "Snakefile"),
+                        "--configfile", str(cfg), "--cores", "1", "--dry-run", "--printshellcmds"],
+                       cwd=tmp_path, env=env, capture_output=True, text=True)
+    out = p.stdout + p.stderr
+    assert p.returncode == 0, out
+    combines = [l for l in out.splitlines() if "cli combine " in l]
+    assert any("--accessions host1 NC_064185.1 " in l and "/hosts/A/" in l for l in combines), combines
+    assert any("--accessions host1 --fastas" in l and "/hosts/B/" in l for l in combines), combines

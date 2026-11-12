@@ -248,11 +248,11 @@ def member_files(acc):
     return RUN(acc) / f"{acc}_clean.fna", RUN(acc) / "run.json"
 
 
-def mitochondrion_files(acc):
-    """A genome's mitochondrion (config key "mitochondrion") and its record."""
-    m = GENOMES[acc]["spec"].mitochondrion
-    d = G(acc) / "mitochondrion" / m
-    return d / f"{m}.fna", d / "record.json"
+def mitochondrion_files(acc, mito):
+    """A genome's mitochondrion and its record. Taken from the host's own genome entry, not
+    from GENOMES: one assembly can serve two hosts, and only one of them may name one."""
+    d = G(acc) / "mitochondrion" / mito
+    return d / f"{mito}.fna", d / "record.json"
 
 
 def host_members(h):
@@ -263,7 +263,7 @@ def host_members(h):
         fasta, record = member_files(g.key)
         out.append((g.key, fasta, record, "-"))
         if g.mitochondrion:
-            mf, mr = mitochondrion_files(g.key)
+            mf, mr = mitochondrion_files(g.key, g.mitochondrion)
             out.append((g.mitochondrion, mf, mr, g.key))
     return out
 
