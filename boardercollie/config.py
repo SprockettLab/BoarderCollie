@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,9 @@ from typing import Any
 import yaml
 
 from .references import is_automatic
+
+# An NCBI Nucleotide accession with its version: NC_012920.1, CM045128.1, PZ236456.1.
+NUCLEOTIDE_ACCESSION = re.compile(r"[A-Z]{1,4}_?[0-9]{5,10}\.[0-9]+")
 
 DEFAULT_SETTINGS: dict[str, Any] = {
     # Download the genomes and join them as they are: no screening, no checks, no cleaning.
@@ -93,6 +97,12 @@ class GenomeSpec:
     fasta: str | None = None
     tax_id: int | None = None
     relative: str | None = None
+    # The species' complete mitochondrial genome (an NCBI Nucleotide accession, e.g. the
+    # RefSeq NC_ record), added to the host reference after this genome. For assemblies
+    # deposited without their mitochondrion, as most are: NCBI adds the same record to
+    # its RefSeq copies. Checked when fetched (fetch_mitochondrion): it must be a complete
+    # mitochondrion of the same species, and the assembly must not already hold one.
+    mitochondrion: str | None = None
 
     @property
     def key(self) -> str:
@@ -217,7 +227,7 @@ def _genome(entry: Any, host: str) -> GenomeSpec:
         return GenomeSpec(accession=entry)
     if not isinstance(entry, dict):
         raise ConfigError(f"host {host}: each genome is an accession or a mapping")
-    unknown = set(entry) - {"accession", "fasta", "tax_id", "relative"}
+    unknown = set(entry) - {"accession", "fasta", "tax_id", "relative", "mitochondrion"}
     if unknown:
         raise ConfigError(f"host {host}: unknown genome keys {sorted(unknown)}")
     g = GenomeSpec(**entry)
@@ -227,6 +237,10 @@ def _genome(entry: Any, host: str) -> GenomeSpec:
         raise ConfigError(f"host {host}: give either accession or fasta for each genome")
     if g.fasta and not isinstance(g.tax_id, int):
         raise ConfigError(f"host {host}: a local fasta needs an integer tax_id")
+    if g.mitochondrion is not None and not (isinstance(g.mitochondrion, str)
+                                            and NUCLEOTIDE_ACCESSION.fullmatch(g.mitochondrion)):
+        raise ConfigError(f"host {host}: genome {g.key}: mitochondrion must be an NCBI Nucleotide accession "
+                          f"with its version, e.g. NC_012920.1; got {g.mitochondrion!r}")
     return g
 
 

@@ -69,6 +69,33 @@ def download_genome(accession: str, out_fasta: Path) -> str:
     return md5
 
 
+EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+
+
+def nucleotide_summary(accession: str) -> dict:
+    """NCBI's summary of one Nucleotide record (title, taxid, slen, genome, completeness...)."""
+    q = urllib.parse.urlencode({"db": "nuccore", "id": accession, "retmode": "json"})
+    d = json.loads(_get(f"{EUTILS}/esummary.fcgi?{q}"))["result"]
+    uids = d.get("uids") or []
+    if len(uids) != 1 or d[uids[0]].get("accessionversion") != accession:
+        raise ValueError(f"{accession}: not found in NCBI Nucleotide")
+    return d[uids[0]]
+
+
+def nucleotide_fasta(accession: str) -> str:
+    """One Nucleotide record as FASTA text."""
+    q = urllib.parse.urlencode({"db": "nuccore", "id": accession, "rettype": "fasta", "retmode": "text"})
+    return _get(f"{EUTILS}/efetch.fcgi?{q}").decode()
+
+
+def assembly_mitochondria(accession: str) -> list[str]:
+    """Sequence accessions of the mitochondrion an assembly already holds (usually none or one)."""
+    q = urllib.parse.urlencode({"role_filters": "assembled-molecule", "page_size": "1000"})
+    d = json.loads(_get(f"{API}/genome/accession/{accession}/sequence_reports?{q}"))
+    return [r.get("refseq_accession") or r.get("genbank_accession") for r in d.get("reports") or []
+            if r.get("assigned_molecule_location_type") == "Mitochondrion"]
+
+
 def ranks_of(taxids) -> dict[int, dict[str, int]]:
     """tax-id -> {rank: tax-id} from the NCBI classification."""
     return {t: v["ranks"] for t, v in taxonomy(taxids).items()}

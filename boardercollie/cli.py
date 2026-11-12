@@ -41,6 +41,15 @@ def cmd_fetch(a):
     Path(a.out_record).write_text(json.dumps(rec, indent=1))
 
 
+def cmd_fetch_mitochondrion(a):
+    from . import ncbi
+    from .mitochondrion import fetch_mitochondrion
+    rec = fetch_mitochondrion(a.accession, a.genome, json.loads(Path(a.genome_record).read_text()),
+                              Path(a.out_fasta), summary=ncbi.nucleotide_summary, fasta=ncbi.nucleotide_fasta,
+                              assembly_mitochondria=ncbi.assembly_mitochondria, ranks_of=ncbi.ranks_of)
+    Path(a.out_record).write_text(json.dumps(rec, indent=1))
+
+
 def cmd_taxid(a):
     print(json.loads(Path(a.record).read_text())["tax_id"])
 
@@ -148,9 +157,13 @@ def cmd_check_clean(a):
 
 def cmd_combine(a):
     names = set()
+    # member_of: "-" for a genome; for a genome's mitochondrion, that genome's accession.
+    member_of = getattr(a, "member_of", None) or ["-"] * len(a.accessions)
+    if not len(a.accessions) == len(a.fastas) == len(a.records) == len(member_of):
+        raise ValueError("combine: --accessions, --fastas, --records and --member-of differ in length")
     with open(a.out, "w") as dst, open(a.members_out, "w") as mem:
-        mem.write("accession\tclean_genome\tclean_md5\trun_record\n")
-        for acc, fasta, record in zip(a.accessions, a.fastas, a.records):
+        mem.write("accession\tclean_genome\tclean_md5\trun_record\tmember_of\n")
+        for acc, fasta, record, of in zip(a.accessions, a.fastas, a.records, member_of):
             with open(fasta) as src:
                 for line in src:
                     if line.startswith(">"):
@@ -159,7 +172,7 @@ def cmd_combine(a):
                             raise ValueError(f"sequence name {n} occurs in two members")
                         names.add(n)
                     dst.write(line)
-            mem.write(f"{acc}\t{fasta}\t{md5(Path(fasta))}\t{record}\n")
+            mem.write(f"{acc}\t{fasta}\t{md5(Path(fasta))}\t{record}\t{of}\n")
 
 
 def cmd_report(a):
@@ -181,6 +194,10 @@ def main(argv=None):
     s = sub.add_parser("fetch"); s.set_defaults(f=cmd_fetch)
     s.add_argument("--accession"); s.add_argument("--local-fasta"); s.add_argument("--tax-id", type=int)
     s.add_argument("--out-fasta", required=True); s.add_argument("--out-record", required=True)
+
+    s = sub.add_parser("fetch-mitochondrion"); s.set_defaults(f=cmd_fetch_mitochondrion)
+    for k in ("accession", "genome", "genome-record", "out-fasta", "out-record"):
+        s.add_argument(f"--{k}", required=True)
 
     s = sub.add_parser("taxid"); s.set_defaults(f=cmd_taxid); s.add_argument("record")
 
@@ -226,6 +243,7 @@ def main(argv=None):
     s.add_argument("--accessions", nargs="+", required=True); s.add_argument("--fastas", nargs="+", required=True)
     s.add_argument("--records", nargs="+", required=True)
     s.add_argument("--out", required=True); s.add_argument("--members-out", required=True)
+    s.add_argument("--member-of", nargs="+", help="per member: - for a genome, else the genome it belongs to")
 
     s = sub.add_parser("report"); s.set_defaults(f=cmd_report)
     s.add_argument("--host", required=True)
