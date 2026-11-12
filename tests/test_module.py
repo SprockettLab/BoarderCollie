@@ -190,6 +190,51 @@ def test_module_plan_with_every_check(tmp_path):
     assert out.count("--settings-hash ") == 2 and "--settings-hash {" not in out
 
 
+def _every_check_plan(tmp_path, controls_fna_text):
+    """Plan with every check on, a shared controls FASTA older than the controls table (as
+    for any caller whose BoarderCollie clone is new), and the given FASTA contents."""
+    fasta = tmp_path / "host1.fna"
+    fasta.write_text(">c1\nACGTACGTACGGGCCCAAAT\n")
+    gxdb = tmp_path / "gxdb"
+    gxdb.mkdir()
+    (gxdb / "all.meta.jsonl").write_text('{"build-date": "2023-01-24"}\n')
+    work = tmp_path / "work"
+    work.mkdir()
+    fna = work / "foreign_controls.fna"
+    fna.write_text(controls_fna_text)
+    os.utime(fna, (1_000_000_000, 1_000_000_000))   # 2001: older than the clone's table
+    return module_plan(tmp_path, {
+        "fcs_gx_db": str(gxdb),
+        "hosts": [{"name": "H", "genomes": [{"fasta": str(fasta), "tax_id": 60711, "relative": "GCF_000409795.2"}],
+                   "ladder": ["GCF_049350105.2", "GCF_029281585.2"], "indexes": []}]})
+
+
+def test_fresh_clone_does_not_refetch_current_controls(tmp_path):
+    from boardercollie.controls import listed
+    accs = listed(REPO / "resources" / "foreign_controls.tsv")
+    code, out = _every_check_plan(tmp_path, "".join(f">FOREIGN_{a}\nACGT\n" for a in accs))
+    assert code == 0, out
+    assert "rule boardercollie_foreign_controls:" not in out, out
+
+
+def test_changed_controls_list_is_fetched_again(tmp_path):
+    code, out = _every_check_plan(tmp_path, ">FOREIGN_NOT_LISTED.1\nACGT\n")
+    assert code == 0, out
+    assert "rule boardercollie_foreign_controls:" in out, out
+
+
+def test_controls_up_to_date(tmp_path):
+    from boardercollie.controls import fetched, listed, up_to_date
+    tsv = tmp_path / "c.tsv"
+    tsv.write_text("# accession\tdescription\nA.1\tone\nB.2\ttwo\n")
+    fna = tmp_path / "c.fna"
+    assert listed(tsv) == ["A.1", "B.2"] and not up_to_date(tsv, fna)
+    fna.write_text(">FOREIGN_A.1\nACGT\n>FOREIGN_B.2\nGGCC\n")
+    assert fetched(fna) == ["A.1", "B.2"] and up_to_date(tsv, fna)
+    fna.write_text(">FOREIGN_A.1\nACGT\n")
+    assert not up_to_date(tsv, fna)
+
+
 def test_module_plan_with_reports_made_earlier(tmp_path):
     from test_precomputed import genome as small_genome, reports
     fasta = small_genome(tmp_path, "host1")
