@@ -39,6 +39,7 @@ os.environ["PYTHONPATH"] = os.pathsep.join([str(REPO)] + [p for p in os.environ.
 
 from boardercollie import __version__
 from boardercollie.config import parse_config, settings_hash, write_if_changed
+from boardercollie.controls import up_to_date as controls_up_to_date
 from boardercollie.precomputed import build_date, find_reports, reports_hash
 from boardercollie.references import resolve
 
@@ -423,8 +424,15 @@ rule reference_without_flagged:
 rule foreign_controls:
     conda:
         "envs/boardercollie.yaml"
+    # The table is in BoarderCollie's own folder, and each caller (each MAGmaker run
+    # folder) has a fresh clone of it, so its mtime is the clone's. When the shared
+    # FASTA already holds exactly the listed accessions, that mtime is ignored
+    # (ancient); otherwise the controls are fetched again, so a changed list is never
+    # missed. Without this, every new caller redid align, decide, clean and combine.
     input:
-        RES / "foreign_controls.tsv",
+        ancient(RES / "foreign_controls.tsv")
+        if controls_up_to_date(RES / "foreign_controls.tsv", WORK / "foreign_controls.fna")
+        else RES / "foreign_controls.tsv",
     output:
         WORK / "foreign_controls.fna",
     shell:
