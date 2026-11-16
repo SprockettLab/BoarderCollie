@@ -170,3 +170,152 @@ def test_resolve_records_none_found(tmp_path):
     lines = resolve(cfg, tmp_path, f)
     assert cfg.hosts[0].genomes[0].relative is None and cfg.hosts[0].ladder == []
     assert "none found" in lines[0] and "none found" in lines[1]
+
+
+# ── Per-genome ladders: a host that joins genomes of different lineages ──────
+
+PARASITE = {"species": 5, "genus": 50, "family": 500, "order": 5000, "class": 50000}
+
+
+class MixedNCBI(FakeNCBI):
+    """FakeNCBI plus a second lineage: species 5 in genus 50, family 500, order 5000,
+    with a relative (species 6, same genus) and one reference genome per ladder rank."""
+
+    def __init__(self):
+        super().__init__()
+        self.lineages.update({5: PARASITE, 6: {**PARASITE, "species": 6},
+                              7: {**PARASITE, "species": 7, "genus": 51},
+                              8: {**PARASITE, "species": 8, "genus": 52, "family": 501}})
+        self.reports["GCA_5.1"] = rep("GCA_5.1", 5, project="Q1", sample="T1", n50=10**7)
+        self.under.update({5: [self.reports["GCA_5.1"]],
+                           50: [rep("GCA_6.1", 6, project="Q2", n50=10**7)],
+                           500: [rep("GCF_7.1", 7, project="Q3", ref=True, level="Chromosome", n50=10**8)],
+                           5000: [rep("GCF_8.1", 8, project="Q4", ref=True, level="Chromosome", n50=10**8)]})
+
+    def genomes_under(self, taxid, reference_only=False):
+        self.calls += 1
+        rows = [r for rs in self.under.values() for r in rs
+                if taxid in self.lineages[r["organism"]["tax_id"]].values()]
+        rows = list({r["accession"]: r for r in rows}.values())
+        if reference_only:
+            rows = [r for r in rows if r["assembly_info"]["refseq_category"] == "reference genome"]
+        return rows
+
+
+def mixed_config(tmp_path, host_ladder=None, genome_ladder=None):
+    from boardercollie.config import parse_config
+    second = {"accession": "GCA_5.1"}
+    if genome_ladder is not None:
+        second["ladder"] = genome_ladder
+    h = {"name": "host_and_parasite", "genomes": [{"accession": "GCA_1.1"}, second]}
+    if host_ladder is not None:
+        h["ladder"] = host_ladder
+    return parse_config({"library_dir": str(tmp_path), "index_dir": "/i", "work_dir": "/w", "fcs_gx_db": "/d",
+                         "hosts": [h]})
+
+
+def test_mixed_host_gets_one_ladder_per_lineage(tmp_path):
+    from boardercollie.references import resolve
+    f = MixedNCBI()
+    cfg = mixed_config(tmp_path)
+    resolve(cfg, tmp_path, f)
+    host, parasite = cfg.hosts[0].genomes
+    # Each genome's ladder comes from its own lineage, never from the other's.
+    assert host.ladder == ["GCF_3.1", "GCF_4.1"]
+    assert parasite.ladder == ["GCF_7.1", "GCF_8.1"]
+    assert host.relative == "GCA_2.1" and parasite.relative == "GCA_6.1"
+    assert cfg.hosts[0].ladder == []  # no single host ladder
+    d = tmp_path / "hosts" / "host_and_parasite"
+    assert (d / "lineage_groups.json").exists()
+    assert (d / "ladder_choice" / "GCA_1.1.json").exists() and (d / "ladder_choice" / "GCA_5.1.json").exists()
+    assert not (d / "ladder_choice.json").exists()
+    # Saved choices are reused: NCBI is not asked again.
+    calls = f.calls
+    cfg2 = mixed_config(tmp_path)
+    resolve(cfg2, tmp_path, f)
+    assert f.calls == calls
+    assert [g.ladder for g in cfg2.hosts[0].genomes] == [["GCF_3.1", "GCF_4.1"], ["GCF_7.1", "GCF_8.1"]]
+
+
+def test_single_lineage_host_unchanged(tmp_path):
+    """A host whose genomes share a lineage gets the same ladder, in the same saved file
+    with the same inputs, as before genomes had their own: run keys cannot change."""
+    from boardercollie.references import resolve
+    f = FakeNCBI()
+    cfg = config(tmp_path)
+    resolve(cfg, tmp_path, f)
+    g, h = cfg.hosts[0].genomes[0], cfg.hosts[0]
+    assert g.ladder == h.ladder == ["GCF_3.1", "GCF_4.1"]
+    saved = json.loads((tmp_path / "hosts" / "host" / "ladder_choice.json").read_text())
+    assert saved["inputs"] == {"genomes": ["GCA_1.1"], "relatives": ["GCA_2.1"],
+                               "ladder_ranks": ["family", "order"], "relative_min_scaffold_n50": 1000000}
+    assert not (tmp_path / "hosts" / "host" / "ladder_choice").exists()
+
+
+def test_saved_single_ladder_used_without_ncbi(tmp_path):
+    """A ladder saved by an earlier version (no lineage_groups.json beside it) is used
+    as it is: the genomes' lineages are not looked up."""
+    from boardercollie.references import resolve
+    f = FakeNCBI()
+    resolve(config(tmp_path), tmp_path, f)
+    (tmp_path / "hosts" / "host" / "lineage_groups.json").unlink()
+    calls = f.calls
+    cfg = config(tmp_path)
+    resolve(cfg, tmp_path, f)
+    assert f.calls == calls
+    assert cfg.hosts[0].genomes[0].ladder == ["GCF_3.1", "GCF_4.1"]
+
+
+def test_genome_ladder_overrides_host_ladder(tmp_path):
+    from boardercollie.references import resolve
+    f = MixedNCBI()
+    cfg = mixed_config(tmp_path, host_ladder=["GCA_90.1"], genome_ladder=["GCF_7.1", "GCF_8.1"])
+    lines = resolve(cfg, tmp_path, f)
+    assert lines and all(": relative " in l for l in lines)  # relatives chosen, no ladder chosen
+    assert not (tmp_path / "hosts" / "host_and_parasite").exists()
+    host, parasite = cfg.hosts[0].genomes
+    assert host.ladder == ["GCA_90.1"] and parasite.ladder == ["GCF_7.1", "GCF_8.1"]
+
+
+def test_named_ladder_for_one_genome_automatic_for_the_other(tmp_path):
+    from boardercollie.references import resolve
+    f = MixedNCBI()
+    cfg = mixed_config(tmp_path, genome_ladder=["GCF_7.1", "GCF_8.1"])
+    resolve(cfg, tmp_path, f)
+    host, parasite = cfg.hosts[0].genomes
+    assert parasite.ladder == ["GCF_7.1", "GCF_8.1"]
+    assert host.ladder == ["GCF_3.1", "GCF_4.1"]
+
+
+def test_missing_rank_keeps_one_group():
+    """A rank one genome has no taxon for is left out, as choose_ladder leaves it out,
+    so genomes that differ only there stay together."""
+    from boardercollie.references import lineage_groups
+    a = {"family": 100, "order": 1000}
+    b = {"family": None, "order": 1000}
+    c = {"family": 101, "order": 1000}
+    assert lineage_groups(["a", "b", "c"], {"a": a, "b": b, "c": c}.get, ["family", "order"]) == [["a", "b", "c"]]
+    d = {"family": 500, "order": 5000}
+    assert lineage_groups(["a", "d"], {"a": a, "d": d}.get, ["family", "order"]) == [["a"], ["d"]]
+
+
+def test_genome_ladder_config_checks():
+    import pytest
+    from boardercollie.config import ConfigError, parse_config
+
+    def cfg(genome, ladder=None):
+        h = {"name": "h", "genomes": [genome, "GCA_2.1"]}
+        if ladder is not None:
+            h["ladder"] = ladder
+        return parse_config({"library_dir": "/l", "index_dir": "/i", "work_dir": "/w", "fcs_gx_db": "/d",
+                             "hosts": [h]})
+
+    c = cfg({"accession": "GCA_1.1", "ladder": ["GCF_9.1"]}, ladder=["GCF_8.1"])
+    assert [g.ladder for g in c.hosts[0].genomes] == [["GCF_9.1"], ["GCF_8.1"]]
+    assert cfg({"accession": "GCA_1.1", "ladder": "auto"}).hosts[0].genomes[0].ladder == []
+    with pytest.raises(ConfigError):
+        cfg({"accession": "GCA_1.1", "ladder": ["GCA_2.1"]})          # a ladder genome is a host genome
+    with pytest.raises(ConfigError):
+        cfg({"accession": "GCA_1.1", "relative": "GCF_9.1", "ladder": ["GCF_9.1"]})
+    with pytest.raises(ConfigError):
+        cfg({"accession": "GCA_1.1", "ladder": "GCF_9.1"})            # not a list

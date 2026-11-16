@@ -61,6 +61,7 @@ else:
         _h.ladder = []
         for _g in _h.genomes:
             _g.relative = None
+            _g.ladder = []
 print("BoarderCollie checks:", "download only" if DOWNLOAD_ONLY else
       ", ".join(f"{k} {'on' if v else 'off'}" for k, v in CHECKS.items()), file=sys.stderr)
 SETTINGS_HASH = settings_hash(CFG.settings)
@@ -126,7 +127,8 @@ onstart:
         "checks": CFG.settings["checks"], "fcs_gx_db": str(CFG.fcs_gx_db), "fcs_gx_build": GX,
         "fcs_gx_reports_made_earlier": {a: [str(p) for p in pair] for a, pair in PRECOMPUTED.items()},
         "hosts": {h.name: {"genomes": [g.key for g in h.genomes],
-                           "relatives": {g.key: g.relative for g in h.genomes}, "ladder": h.ladder}
+                           "relatives": {g.key: g.relative for g in h.genomes},
+                           "ladders": {g.key: g.ladder for g in h.genomes}}
                   for h in CFG.hosts}}, sort_keys=True))
     for name, version in tool_versions().items():
         log_row("tool_version", step=name, detail=version)
@@ -152,7 +154,7 @@ GENOMES = {}
 for h in CFG.hosts:
     for g in h.genomes:
         GENOMES[g.key] = {"spec": g, "host": h}
-REFERENCES = sorted(({g["spec"].relative for g in GENOMES.values()} - {None}) | {a for h in CFG.hosts for a in h.ladder})
+REFERENCES = sorted(({g["spec"].relative for g in GENOMES.values()} - {None}) | {a for g in GENOMES.values() for a in g["spec"].ladder})
 ALL = sorted(set(GENOMES) | set(REFERENCES))
 
 # FCS-GX reports made earlier (fcs_gx_reports): genomes with a report pair there are
@@ -215,10 +217,10 @@ def screen_files(acc):
 def run_key(acc):
     g = GENOMES[acc]
     key = {"version": __version__, "gx": GX, "settings": SETTINGS_HASH,
-           "relative": g["spec"].relative, "ladder": g["host"].ladder}
+           "relative": g["spec"].relative, "ladder": g["spec"].ladder}
     # Reports made earlier (for the genome or its references) are part of the key, so
     # results from them never mix with results from FCS-GX run here.
-    used = {a: PHASH[a] for a in [acc, g["spec"].relative, *g["host"].ladder] if a in PRECOMPUTED}
+    used = {a: PHASH[a] for a in [acc, g["spec"].relative, *g["spec"].ladder] if a in PRECOMPUTED}
     if used:
         key["precomputed_reports"] = used
     return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:12]
@@ -275,8 +277,13 @@ def W(acc):
 
 
 def lineage_candidates(acc):
-    h = GENOMES[acc]["host"]
-    return sorted(({GENOMES[acc]["spec"].relative} - {None}) | {g.key for g in h.genomes if g.key != acc})
+    # The relative and the host's other genomes of the same lineage, the ones sharing
+    # this genome's ladder. In a host of one lineage that is every other genome, as it
+    # always was; in a host joining a primate and its parasite, neither is a candidate
+    # for the other, so neither genome's inputs change when the other is added.
+    g = GENOMES[acc]
+    return sorted(({g["spec"].relative} - {None})
+                  | {o.key for o in g["host"].genomes if o.key != acc and o.ladder == g["spec"].ladder})
 
 
 HOSTS = {h.name: h for h in CFG.hosts}
@@ -565,9 +572,9 @@ def decide_inputs(w):
     acc, key = w.acc, w.key
     g = GENOMES[acc]
     d = W(acc)
-    refs = [r for r in [g["spec"].relative, *g["host"].ladder] if r]
+    refs = [r for r in [g["spec"].relative, *g["spec"].ladder] if r]
     lineage = lineage_candidates(acc)
-    distant = {"distant": d / "copies" / f"{g['host'].ladder[-1]}.paf"} if g["host"].ladder else {}
+    distant = {"distant": d / "copies" / f"{g['spec'].ladder[-1]}.paf"} if g["spec"].ladder else {}
     common = {
         "segments": d / "segments.tsv",
         "fasta": d / "segments.fna",
@@ -589,7 +596,7 @@ def decide_inputs(w):
 def decide_args(w):
     g = GENOMES[w.acc]
     d = W(w.acc)
-    rel, ladder = g["spec"].relative, g["host"].ladder
+    rel, ladder = g["spec"].relative, g["spec"].ladder
     if not ALIGN:
         return ""
     al = [f"--trf {d / 'trf.ngs'} --own-copies {d / 'copies' / 'own.paf'}"]
@@ -688,7 +695,7 @@ rule combine:
 
 def report_spec(acc):
     g = GENOMES[acc]
-    rel, ladder = g["spec"].relative, g["host"].ladder
+    rel, ladder = g["spec"].relative, g["spec"].ladder
     if DOWNLOAD_ONLY:
         dec, run = "-", G(acc) / "original" / "record.json"
     else:

@@ -31,6 +31,10 @@ Every region, test result, rule and threshold is recorded, and the records can b
 See [`config/config.example.yaml`](config/config.example.yaml).
 A host is a name and its genomes (NCBI assembly accessions or local FASTA files).
 Each genome's closest relative and the host's comparison genomes (reference ladder) are chosen from the NCBI taxonomy unless the config names them.
+Each genome is compared with its own reference ladder.
+A host whose genomes share a lineage gets one ladder for all of them, as before.
+A host that joins genomes of different lineages, such as a primate and a parasite it carries, gets one ladder per lineage, each chosen from that lineage's own taxa, and the genomes of one lineage are never used as comparisons for the other.
+A genome entry can also name its own ladder, `{accession: GCA_000006355.3, ladder: [GCF_..., GCF_...]}`, which overrides the host's.
 Each choice is saved in the library with every candidate considered, and reused on later runs while the genomes and settings are unchanged.
 Every threshold is a setting with a default.
 

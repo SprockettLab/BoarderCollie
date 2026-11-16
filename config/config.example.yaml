@@ -46,6 +46,14 @@ hosts:
   #   genomes:
   #     - {fasta: /path/to/assembly.fna, tax_id: 9534, relative: GCF_047675955.1}
   #   ladder: auto
+  # A host can join genomes of different lineages, such as a primate and a parasite it
+  # carries. Each genome is compared with a ladder from its own lineage: chosen
+  # automatically per lineage, or named on the genome entry (which overrides the host's).
+  # - name: Macaca_mulatta__Pknowlesi
+  #   genomes:
+  #     - GCA_049350105.2
+  #     - {accession: GCA_000006355.3, mitochondrion: NC_007232.1}
+  #   ladder: auto
 
 # Every setting has a default (shown here); remove a line to use the default.
 settings:
