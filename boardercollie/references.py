@@ -264,20 +264,79 @@ def resolve(cfg, library_dir: Path, ncbi=None) -> list[str]:
                                lambda g=g: choose_relative(*assembly(g), ncbi.genomes_under, min_n50), inputs)
             g.relative = ch["relative"]
             lines.append(f"{h.name} {g.key}: relative {g.relative or 'none found'} ({ch['reason']})")
-        if not h.ladder:
-            relatives = sorted({g.relative for g in h.genomes} - {None})
-            inputs = {"genomes": sorted(g.key for g in h.genomes), "relatives": relatives,
+        auto = [g for g in h.genomes if not g.ladder]
+        if not auto:
+            continue
+        relatives = sorted({g.relative for g in h.genomes} - {None})
+        exclude = {g.key for g in h.genomes} | set(relatives)
+        single = library_dir / "hosts" / h.name / "ladder_choice.json"
+        single_inputs = {"genomes": sorted(g.key for g in h.genomes), "relatives": relatives,
+                         "ladder_ranks": s["ladder_ranks"], "relative_min_scaffold_n50": min_n50}
+        if len(auto) == len(h.genomes) and saved_for(single, single_inputs):
+            # One ladder for the whole host, saved earlier: reused as it is, NCBI not asked.
+            split = [h.genomes]
+        else:
+            # Which genomes share a lineage, worked out once from the NCBI taxonomy and
+            # saved, so later runs (and every cluster job that reads the workflow) do
+            # not ask NCBI again.
+            ch = cached_choice(
+                library_dir / "hosts" / h.name / "lineage_groups.json",
+                lambda auto=auto: {"groups": [[g.key for g in grp] for grp in lineage_groups(
+                    auto, lambda g: assembly(g)[1], s["ladder_ranks"])]},
+                {"genomes": sorted(g.key for g in auto), "ladder_ranks": s["ladder_ranks"]})
+            by_key = {g.key: g for g in auto}
+            split = [[by_key[k] for k in grp] for grp in ch["groups"]]
+        if len(split) == 1 and len(split[0]) == len(h.genomes):
+            # One lineage: one ladder for the whole host, chosen and saved exactly as
+            # before genomes could have their own, so every existing choice and run
+            # key stays as it was.
+            groups = [(h.genomes, single, h.name)]
+        else:
+            # Genomes of different lineages (a primate and its parasite): one ladder per
+            # lineage, each chosen from that lineage's own taxa.
+            groups = [(members, library_dir / "hosts" / h.name / "ladder_choice"
+                       / ("+".join(sorted(g.key for g in members)) + ".json"),
+                       f"{h.name} [{', '.join(g.key for g in members)}]") for members in split]
+        for members, path, label in groups:
+            inputs = {"genomes": sorted(g.key for g in members), "relatives": relatives,
                       "ladder_ranks": s["ladder_ranks"], "relative_min_scaffold_n50": min_n50}
             ch = cached_choice(
-                library_dir / "hosts" / h.name / "ladder_choice.json",
-                lambda h=h, relatives=relatives: choose_ladder(
-                    [assembly(g) for g in h.genomes], {g.key for g in h.genomes} | set(relatives), s["ladder_ranks"],
+                path,
+                lambda members=members: choose_ladder(
+                    [assembly(g) for g in members], exclude, s["ladder_ranks"],
                     lambda t: ncbi.genomes_under(t, reference_only=True), ncbi.ranks_of, min_n50),
                 inputs)
-            h.ladder = list(ch["ladder"])
-            lines.append(f"{h.name}: comparison genomes {', '.join(h.ladder) or 'none found'} ("
+            for g in members:
+                g.ladder = list(ch["ladder"])
+            lines.append(f"{label}: comparison genomes {', '.join(ch['ladder']) or 'none found'} ("
                          + "; ".join(f"{r['rank']}: {r['chosen'] or r['reason']}" for r in ch["rungs"]) + ")")
+        # The host's ladder, where all its genomes share one (as every host did before
+        # genomes could have their own); empty when they differ.
+        ladders = {tuple(g.ladder) for g in h.genomes}
+        h.ladder = list(ladders.pop()) if len(ladders) == 1 else []
     return lines
+
+
+def saved_for(path: Path, inputs: dict) -> bool:
+    """True when a choice saved at `path` was made from these inputs (cached_choice would reuse it)."""
+    if not path.exists():
+        return False
+    return json.loads(path.read_text()).get("inputs", {}) == inputs
+
+
+def lineage_groups(genomes: list, ranks_of_genome: Callable, ladder_ranks: list[str]) -> list[list]:
+    """The genomes split by lineage, in first-seen order; each group gets one ladder.
+
+    Split only where choose_ladder could not serve them with one ladder: at a ladder
+    rank every genome has a taxon for, and the taxa differ. A rank some genome has no
+    taxon for is left out, as choose_ladder leaves it out. So a host choose_ladder
+    accepts stays one group, and its ladder is chosen exactly as before."""
+    ranks = {id(g): ranks_of_genome(g) for g in genomes}
+    usable = [rank for rank in ladder_ranks if all(ranks[id(g)].get(rank) is not None for g in genomes)]
+    groups: dict[tuple, list] = {}
+    for g in genomes:
+        groups.setdefault(tuple(ranks[id(g)][rank] for rank in usable), []).append(g)
+    return list(groups.values())
 
 
 def cached_choice(path: Path, compute: Callable[[], dict], inputs: dict | None = None) -> dict:

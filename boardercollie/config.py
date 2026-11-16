@@ -103,6 +103,11 @@ class GenomeSpec:
     # its RefSeq copies. Checked when fetched (fetch_mitochondrion): it must be a complete
     # mitochondrion of the same species, and the assembly must not already hold one.
     mitochondrion: str | None = None
+    # This genome's comparison genomes (reference ladder), nearest first. Empty in
+    # the config means the host's ladder, or automatic when the host names none.
+    # Each genome is cleaned against its own ladder, so a host that joins genomes
+    # of different lineages (a primate and its parasite) compares each with its own.
+    ladder: list[str] = field(default_factory=list)
 
     @property
     def key(self) -> str:
@@ -231,15 +236,26 @@ def merge_settings(overrides: dict[str, Any] | None) -> dict[str, Any]:
     return settings
 
 
+def _ladder(value: Any, where: str) -> list[str]:
+    """A ladder from the config: a list of accessions, nearest first, or [] for automatic."""
+    if is_automatic(value) or value == [] or (isinstance(value, list) and all(is_automatic(a) for a in value)):
+        return []
+    if not isinstance(value, list) or not all(isinstance(a, str) and not is_automatic(a) for a in value):
+        raise ConfigError(f"{where}: ladder must list reference accessions, nearest first, or be left blank")
+    return list(value)
+
+
 def _genome(entry: Any, host: str) -> GenomeSpec:
     if isinstance(entry, str):
         return GenomeSpec(accession=entry)
     if not isinstance(entry, dict):
         raise ConfigError(f"host {host}: each genome is an accession or a mapping")
-    unknown = set(entry) - {"accession", "fasta", "tax_id", "relative", "mitochondrion"}
+    unknown = set(entry) - {"accession", "fasta", "tax_id", "relative", "mitochondrion", "ladder"}
     if unknown:
         raise ConfigError(f"host {host}: unknown genome keys {sorted(unknown)}")
-    g = GenomeSpec(**entry)
+    entry = dict(entry)
+    ladder = _ladder(entry.pop("ladder", None), f"host {host}: genome {entry.get('accession') or entry.get('fasta')}")
+    g = GenomeSpec(**entry, ladder=ladder)
     if is_automatic(g.relative):
         g.relative = None
     if bool(g.accession) == bool(g.fasta):
@@ -287,18 +303,18 @@ def parse_config(data: dict[str, Any]) -> Config:
             raise ConfigError(f"host {name}: indexes must be from {INDEX_TYPES}")
         # A blank, none, NA or auto relative or ladder is chosen automatically
         # from the NCBI taxonomy when the workflow starts (boardercollie.references).
-        ladder = h.get("ladder")
-        if is_automatic(ladder) or ladder == [] or (isinstance(ladder, list) and all(is_automatic(a) for a in ladder)):
-            ladder = []
-        elif not isinstance(ladder, list) or not all(isinstance(a, str) and not is_automatic(a) for a in ladder):
-            raise ConfigError(f"host {name}: ladder must list reference accessions, nearest first, or be left blank")
+        # A genome's own ladder wins; otherwise it takes the host's (as before genomes
+        # could have their own), and both blank means automatic.
+        ladder = _ladder(h.get("ladder"), f"host {name}")
         for g in genomes:
+            if not g.ladder:
+                g.ladder = list(ladder)
+            if set(g.ladder) & set(keys):
+                raise ConfigError(f"host {name}: genome {g.key}: a ladder reference is also one of the host's genomes")
             if g.relative is None:
                 continue
-            if g.relative == g.key or g.relative in ladder:
+            if g.relative == g.key or g.relative in g.ladder:
                 raise ConfigError(f"host {name}: genome {g.key}: the relative must differ from the genome and the ladder")
-        if set(ladder) & set(keys):
-            raise ConfigError(f"host {name}: a ladder reference is also one of the host's genomes")
         unknown = set(h) - {"name", "genomes", "ladder", "indexes", "reference_out", "bowtie2_out", "minimap2_out"}
         if unknown:
             raise ConfigError(f"host {name}: unknown keys {sorted(unknown)}")
