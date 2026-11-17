@@ -224,3 +224,15 @@ def test_removed_fasta_and_gx_log(genome, tmp_path):
     log.write_text("Applied 2 actions; 1 seqs dropped; 3000 bps dropped; 0 bps lowercased; 100 bps hardmasked.\n")
     with pytest.raises(ValueError):
         check_accounting(path, clean, removed, rem, log)
+
+
+def test_extract_reads_single_tilde_pieces(genome, tmp_path):
+    # FCS-GX also names a piece "name~start..end" (one "~"); extract must find
+    # chr2 in it, as with "~~", instead of stopping on an unknown sequence.
+    path, action, tax, seqs = genome
+    tax.write_text(tax.read_text().replace("chr2~~5001..6000", "chr2~5001..6000"))
+    s = merge_settings({"background_per_segment": 20})
+    out = [tmp_path / n for n in ("seg.fna", "seg.tsv", "comp.tsv")]
+    assert extract(path, action, tax, s, tmp_path / "g.fai", *out) == 2
+    flagged = [r for r in read_tsv(out[1]) if r["type"] == "flagged"]
+    assert sorted((r["seq_id"], r["start"], r["end"]) for r in flagged) == [("bact1", "1", "3000"), ("chr2", "5001", "6000")]

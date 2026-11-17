@@ -3,8 +3,10 @@
 Two FCS-GX outputs are read, both by column name:
   action report (*.fcs_gx_report.txt): one row per region FCS-GX acts on.
   taxonomy report (*.taxonomy.rpt): one row per sequence, or per piece of a
-      sequence split at gaps (seq-id "name~~start..end"), with the best-matching
-      taxa and a result such as "contaminant(div)".
+      sequence, with the best-matching taxa and a result such as
+      "contaminant(div)". A piece's seq-id is the sequence name, "~" or "~~",
+      then its 1-based range: "name~start..end" or "name~~start..end". FCS-GX
+      0.5.5 writes both, sometimes in one report; read by split_seq_id.
 Every action row becomes a candidate, given the tax-id of its best match from
 the taxonomy report. Every contaminant piece of the taxonomy report that no
 action row covers also becomes a candidate (FCS-GX named it but took no action).
@@ -12,6 +14,7 @@ action row covers also becomes a candidate (FCS-GX named it but took no action).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +24,22 @@ TAXONOMY_COLUMNS = ("seq-id", "seq-len", "tax-name-1", "tax-id-1", "div-1", "res
 
 class ReportError(ValueError):
     """An FCS-GX report is missing a column or has an unreadable row."""
+
+
+# "name~start..end" or "name~~start..end". In FCS-GX 0.5.5 reports (2026-11-16,
+# GCA_000006355.3) "~" pieces are separated by the sequence's runs of N
+# (AM910983.2~1..9778, AM910983.2~9879..617452) and "~~" pieces are contiguous
+# (CADCXE010000021.1~~1..1196, ~~1197..4809); both name the same sequence.
+_PIECE = re.compile(r"^(?P<name>.+?)~~?(?P<start>[0-9]+)\.\.(?P<end>[0-9]+)$")
+
+
+def split_seq_id(sid: str) -> tuple[str, int | None, int | None]:
+    """in : a taxonomy-report seq-id
+       out: (sequence name, start, end); start and end are None for a whole sequence"""
+    m = _PIECE.match(sid)
+    if m is None:
+        return sid, None, None
+    return m["name"], int(m["start"]), int(m["end"])
 
 
 @dataclass
@@ -72,13 +91,9 @@ def read_taxonomy_report(path: str | Path) -> list[TaxonomyPiece]:
         if line.startswith("#") or not line.strip():
             continue
         f = line.split("\t")
-        sid = f[c["seq-id"]]
-        if "~~" in sid:
-            name, rng = sid.split("~~", 1)
-            a, b = rng.split("..")
-            start, end = int(a), int(b)
-        else:
-            name, start, end = sid, 1, int(f[c["seq-len"]])
+        name, start, end = split_seq_id(f[c["seq-id"]])
+        if start is None:
+            start, end = 1, int(f[c["seq-len"]])
         tid = f[c["tax-id-1"]]
         pieces.append(TaxonomyPiece(name, start, end, f[c["tax-name-1"]],
                                     int(tid) if tid.isdigit() else None, f[c["div-1"]], f[c["result"]]))
