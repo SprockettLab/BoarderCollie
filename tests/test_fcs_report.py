@@ -2,7 +2,7 @@
 
 import pytest
 
-from boardercollie.fcs_report import ReportError, read_candidates
+from boardercollie.fcs_report import ReportError, read_candidates, split_seq_id
 
 ACTION = """##[["FCS genome report", 2, 1], {"db": {"build-date": "2023-01-24"}}]
 #seq_id\tstart_pos\tend_pos\tseq_len\taction\tdiv\tagg_cont_cov\ttop_tax_name
@@ -60,3 +60,50 @@ def test_missing_column_is_an_error(tmp_path, reports):
     bad.write_text(ACTION.replace("top_tax_name", "something_else"))
     with pytest.raises(ReportError):
         read_candidates(bad, reports[1])
+
+
+# Rows from FCS-GX 0.5.5's reports for P. knowlesi GCA_000006355.3 (2026-11-16).
+# The taxonomy report names pieces with "~" and with "~~". Before "~" was read,
+# CADCXE010000097.1's two contaminant pieces kept "~1..638" in their name, so
+# they were taken for sequences of their own, and extract stopped: "FCS-GX report
+# names sequences not in the genome".
+PK_ACTION = """##[["FCS genome report", 2, 1], {"db": {"build-date": "2023-01-24"}}]
+#seq_id\tstart_pos\tend_pos\tseq_len\taction\tdiv\tagg_cont_cov\ttop_tax_name
+CADCXE010000097.1\t1\t1293\t1293\tEXCLUDE\tanml:primates\t100\tMacaca fascicularis
+"""
+PK_TAX = "\n".join([
+    TAX_HEADER,
+    tax_row("AM910983.2~1..9778", 9778, "Plasmodium knowlesi", 5851, "prst:alveolates", "primary-div"),
+    tax_row("AM910983.2~9879..617452", 607574, "Plasmodium knowlesi", 5851, "prst:alveolates", "primary-div"),
+    tax_row("CADCXE010000021.1~~1..1196", 1196, "Plasmodium knowlesi", 5851, "prst:alveolates", "primary-div"),
+    tax_row("CADCXE010000021.1~~1197..4809", 3613, "Plasmodium knowlesi", 5851, "prst:alveolates", "primary-div"),
+    tax_row("CADCXE010000097.1~1..638", 638, "Macaca fascicularis", 9541, "anml:primates", "contaminant(div)"),
+    tax_row("CADCXE010000097.1~739..1293", 555, "Homo sapiens", 9606, "anml:primates", "contaminant(div)"),
+    tax_row("CADCXE010000098.1~1..600", 600, "Salmo salar", 8030, "anml:fishes", "contaminant(div)"),
+]) + "\n"
+
+
+def test_split_seq_id_reads_both_separators():
+    assert split_seq_id("AM910983.2~9879..617452") == ("AM910983.2", 9879, 617452)
+    assert split_seq_id("CADCXE010000021.1~~1197..4809") == ("CADCXE010000021.1", 1197, 4809)
+    assert split_seq_id("chr1") == ("chr1", None, None)
+    assert split_seq_id("odd~name") == ("odd~name", None, None)
+
+
+def test_single_tilde_pieces_name_their_sequence(tmp_path):
+    a, t = tmp_path / "pk.fcs_gx_report.txt", tmp_path / "pk.taxonomy.rpt"
+    a.write_text(PK_ACTION)
+    t.write_text(PK_TAX)
+    c = read_candidates(a, t)
+    # Every candidate names a real sequence, never a "name~start..end" piece.
+    assert sorted({x.seq_id for x in c}) == ["CADCXE010000097.1", "CADCXE010000098.1"]
+    by = {(x.seq_id, x.source): x for x in c}
+    # The action row covers both of 097's pieces, so they add no candidate, and
+    # it takes its tax-id from the piece naming its top taxon.
+    act = by[("CADCXE010000097.1", "action_report")]
+    assert (act.start, act.end, act.fcs_top_taxid) == (1, 1293, 9541)
+    assert ("CADCXE010000097.1", "taxonomy_report") not in by
+    # 098's contaminant piece has no action row: a candidate with its own range.
+    tax = by[("CADCXE010000098.1", "taxonomy_report")]
+    assert (tax.start, tax.end, tax.fcs_top_taxid) == (1, 600, 8030)
+    assert len(c) == 2

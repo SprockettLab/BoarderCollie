@@ -126,6 +126,17 @@ def test_length_differs(tmp_path):
         check_reports(a, t, genome(tmp_path), 9541)
 
 
+def test_single_tilde_pieces_checked_like_double(tmp_path):
+    a, t = reports(tmp_path / "r", tax_rows=[
+        tax_row("bact1", 3000, "Bacteroides", 816, "prok:x", "contaminant(div)"),
+        tax_row("chr1~1..4900", 4900, "Macaca fascicularis", 9541, "anml:primates", "primary-div"),
+        tax_row("chr1~5001..10000", 5000, "Macaca fascicularis", 9541, "anml:primates", "primary-div")])
+    assert check_reports(a, t, genome(tmp_path), 9541)["taxonomy_rows"] == 3
+    a, t = reports(tmp_path / "s", tax_rows=[tax_row("chr1~5001..10001", 5001, "M", 9541, "anml:primates", "x")])
+    with pytest.raises(ReportError, match="ends past"):
+        check_reports(a, t, genome(tmp_path), 9541)
+
+
 def test_reports_from_two_runs(tmp_path):
     a, t = reports(tmp_path / "r")
     t.write_text(t.read_text().replace("608bfb626fac23ae", "0000000000000000"))

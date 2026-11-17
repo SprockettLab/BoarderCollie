@@ -24,7 +24,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .fcs_report import ACTION_COLUMNS, TAXONOMY_COLUMNS, ReportError, _header, read_candidates
+from .fcs_report import ACTION_COLUMNS, TAXONOMY_COLUMNS, ReportError, _header, read_candidates, split_seq_id
 
 HEADER_FIELDS = ("build-date", "asserted-div", "genome-hash", "git-rev")
 ACTION_SUFFIX = ".fcs_gx_report.txt"
@@ -144,12 +144,11 @@ def check_reports(action: str | Path, taxonomy: str | Path, fasta: str | Path, t
         f = line.split("\t")
         n_tax += 1
         sid = f[c["seq-id"]]
-        name, _, rng = sid.partition("~~")
+        name, _, end = split_seq_id(sid)
         if name not in lengths:
             problems.append(f"taxonomy report names {name}, which is not in the genome")
             continue
-        if rng:
-            end = int(rng.split("..")[1])
+        if end is not None:
             if end > lengths[name]:
                 problems.append(f"taxonomy report piece {sid} ends past {name}'s {lengths[name]} bp")
         elif int(f[c["seq-len"]]) != lengths[name]:
